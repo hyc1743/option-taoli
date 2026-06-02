@@ -94,6 +94,7 @@ def test_ensure_dashboard_bundle_installs_dependencies_before_build(tmp_path, mo
     calls = []
     monkeypatch.setattr(dashboard_server, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: "/usr/bin/npm")
 
     def fake_runner(cmd, cwd, check):
         calls.append((cmd, cwd, check))
@@ -104,6 +105,21 @@ def test_ensure_dashboard_bundle_installs_dependencies_before_build(tmp_path, mo
         (["npm", "install"], tmp_path, True),
         (["npm", "run", "build:dashboard"], tmp_path, True),
     ]
+
+
+def test_ensure_dashboard_bundle_uses_existing_bundle_when_npm_is_missing(tmp_path, monkeypatch, capsys):
+    bundle = tmp_path / "public" / "dashboard.bundle.js"
+    bundle.parent.mkdir()
+    bundle.write_text("bundle")
+    monkeypatch.setattr(dashboard_server, "CLIENT_BUNDLE", bundle)
+    monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+
+    calls = []
+    dashboard_server._ensure_dashboard_bundle(runner=lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    assert calls == []
+    assert "npm not found" in capsys.readouterr().out
 
 
 def test_ensure_dashboard_bundle_skips_when_current(monkeypatch):

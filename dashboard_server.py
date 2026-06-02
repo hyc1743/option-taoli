@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -590,6 +591,11 @@ def _dashboard_bundle_stale() -> bool:
 def _ensure_dashboard_bundle(runner=subprocess.run) -> None:
     if not _dashboard_bundle_stale():
         return
+    if shutil.which("npm") is None:
+        if CLIENT_BUNDLE.exists():
+            print("  → npm not found; using existing dashboard frontend bundle")
+            return
+        raise RuntimeError("npm is required to build the dashboard frontend bundle")
     if not (ROOT_DIR / "node_modules").exists():
         print("  → installing dashboard frontend dependencies")
         runner(["npm", "install"], cwd=ROOT_DIR, check=True)
