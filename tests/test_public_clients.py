@@ -2,6 +2,7 @@ from option_taoli.public_clients import (
     BinancePublicClient,
     BybitPublicClient,
     DeribitPublicClient,
+    GatePublicClient,
     OkxPublicClient,
 )
 
@@ -93,4 +94,28 @@ def test_bybit_public_client_builds_v5_market_urls():
         ("https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT", 4),
         ("https://api.bybit.com/v5/market/orderbook?category=spot&symbol=BTCUSDT&limit=5", 4),
         ("https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=2", 4),
+    ]
+
+
+def test_gate_public_client_builds_options_urls():
+    getter = FakeJSONGetter()
+    client = GatePublicClient(get_json=getter, timeout_seconds=3)
+
+    client.options_underlyings()
+    client.options_expirations(underlying="BTC_USDT")
+    client.options_contracts(underlying="BTC_USDT", expiration=1811744000)
+    client.options_tickers(underlying="BTC_USDT")
+    client.options_order_book(contract="BTC_USDT-20211130-65000-C", limit=5, with_id=True)
+    client.options_underlying_ticker(underlying="BTC_USDT")
+
+    assert getter.urls == [
+        ("https://api.gateio.ws/api/v4/options/underlyings", 3),
+        ("https://api.gateio.ws/api/v4/options/expirations?underlying=BTC_USDT", 3),
+        ("https://api.gateio.ws/api/v4/options/contracts?underlying=BTC_USDT&expiration=1811744000", 3),
+        ("https://api.gateio.ws/api/v4/options/tickers?underlying=BTC_USDT", 3),
+        (
+            "https://api.gateio.ws/api/v4/options/order_book?contract=BTC_USDT-20211130-65000-C&limit=5&with_id=true",
+            3,
+        ),
+        ("https://api.gateio.ws/api/v4/options/underlying/tickers/BTC_USDT", 3),
     ]

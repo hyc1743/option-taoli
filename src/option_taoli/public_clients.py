@@ -275,6 +275,57 @@ class BybitPublicClient:
         return self._get_json(_url(self._base_url, path, params), self._timeout_seconds)
 
 
+class GatePublicClient:
+    def __init__(
+        self,
+        *,
+        base_url: str = "https://api.gateio.ws/api/v4",
+        get_json: JSONGetter | None = None,
+        timeout_seconds: int = 10,
+    ):
+        self._base_url = base_url.rstrip("/")
+        self._get_json = get_json or _http_get_json
+        self._timeout_seconds = timeout_seconds
+
+    def options_underlyings(self) -> dict[str, Any]:
+        return self._get("/options/underlyings")
+
+    def options_expirations(self, *, underlying: str) -> dict[str, Any]:
+        return self._get("/options/expirations", {"underlying": underlying})
+
+    def options_contracts(self, *, underlying: str, expiration: int | None = None) -> dict[str, Any]:
+        return self._get("/options/contracts", _without_none({"underlying": underlying, "expiration": expiration}))
+
+    def options_tickers(self, *, underlying: str) -> dict[str, Any]:
+        return self._get("/options/tickers", {"underlying": underlying})
+
+    def options_order_book(
+        self,
+        *,
+        contract: str,
+        interval: str | None = None,
+        limit: int | None = None,
+        with_id: bool | None = None,
+    ) -> dict[str, Any]:
+        return self._get(
+            "/options/order_book",
+            _without_none(
+                {
+                    "contract": contract,
+                    "interval": interval,
+                    "limit": limit,
+                    "with_id": None if with_id is None else _bool_text(with_id),
+                }
+            ),
+        )
+
+    def options_underlying_ticker(self, *, underlying: str) -> dict[str, Any]:
+        return self._get(f"/options/underlying/tickers/{underlying}")
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._get_json(_url(self._base_url, path, params), self._timeout_seconds)
+
+
 def _http_get_json(url: str, timeout_seconds: int) -> dict[str, Any]:
     with request.urlopen(url, timeout=timeout_seconds) as response:
         return json.loads(response.read().decode("utf-8"))

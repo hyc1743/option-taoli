@@ -23,7 +23,7 @@
 ## 基础类型
 
 ```ts
-type ExchangeId = "deribit" | "binance" | "okx" | "bybit";
+type ExchangeId = "deribit" | "binance" | "okx" | "bybit" | "gate";
 
 type MarketType = "spot" | "option" | "perpetual" | "future";
 
@@ -61,6 +61,7 @@ type EpochMilliseconds = number;
 - `binance:perpetual:BTCUSDT`
 - `okx:option:BTC-USD-250627-100000-C`
 - `bybit:option:BTC-26MAR27-78000-P-USDT`
+- `gate:option:BTC_USDT-20211130-65000-C`
 
 ### 分组键
 

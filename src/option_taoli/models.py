@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 
-ExchangeId = Literal["deribit", "binance", "okx", "bybit"]
+ExchangeId = Literal["deribit", "binance", "okx", "bybit", "gate"]
 MarketType = Literal["spot", "option", "perpetual", "future"]
 OptionType = Literal["call", "put"]
 ContractType = Literal["linear", "inverse", "quanto", "spot", "unknown"]

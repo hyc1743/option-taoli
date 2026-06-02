@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Option Arbitrage Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0B0C0A;
+      --panel: #11130F;
+      --line: #30342C;
+      --text: #E5E7E0;
+      --muted: #8B9284;
+      --signal: #00E676;
+      --danger: #FF3B30;
+      --amber: #FFB800;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0B0C0A;
+      color: var(--text);
+      font-family: "IBM Plex Mono", "JetBrains Mono", monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    .rail {
+      border-right: 1px solid var(--line);
+      padding: 18px 14px;
+      background: #000000;
+    }
+    .rail strong {
+      display: block;
+      color: var(--signal);
+      font-size: 24px;
+      line-height: 1;
+      margin-bottom: 10px;
+      overflow-wrap: anywhere;
+    }
+    .rail span, .meta {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    main { min-width: 0; }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+    .ok { color: var(--signal); }
+    .blocked { color: var(--danger); }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      padding: 2px 5px;
+      margin: 0 4px 4px 0;
+      color: var(--amber);
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+      header { display: block; }
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(120px, 1fr));
+      gap: 0;
+      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line);
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border-right: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    select, input {
+      width: 100%;
+      background: #0B0C0A;
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 7px 8px;
+      font: inherit;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      min-width: 1280px;
+      border-collapse: collapse;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      background: #000000;
+      position: sticky;
+      top: 0;
+    }
+    td { font-size: 12px; }
+    .num { text-align: right; }
+    .ok { color: var(--signal); }
+    .blocked { color: var(--danger); }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      padding: 2px 5px;
+      margin: 0 4px 4px 0;
+      color: var(--amber);
+    }
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 28px;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+      header { display: block; }
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="rail">
+      <strong>0</strong>
+      <span>Displayed opportunities</span>
+      <span>Generated 2027-05-21T06:13:20+00:00</span>
+    </aside>
+    <main>
+      <header>
+        <h1>Option Arbitrage Monitor</h1>
+        <span class="meta">Put-Call Parity, Box Spread, Implied Futures Basis</span>
+      </header>
+      <section class="filters" aria-label="Opportunity filters">
+        <label>Arbitrage type<select name="opportunity_type"><option>All</option><option>put_call_parity</option><option>box_spread</option><option>implied_futures_basis</option></select></label>
+        <label>Exchange<select name="exchange"><option>All</option><option>deribit</option><option>binance</option><option>okx</option><option>bybit</option><option>gate</option></select></label>
+        <label>Underlying<input name="underlying" type="text" placeholder="BTC"></label>
+        <label>Expiry<input name="expiry" type="date"></label>
+        <label>Min net profit<input name="min_net_profit" type="number" step="0.01"></label>
+        <label>Min annualized<input name="min_annualized" type="number" step="0.0001"></label>
+        <label>Max slippage<input name="max_slippage" type="number" step="0.01"></label>
+        <label>Min depth<input name="min_depth" type="number" step="0.01"></label>
+      </section>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Arbitrage type</th>
+              <th>Exchange</th>
+              <th>Underlying</th>
+              <th>Expiry</th>
+              <th>Strike</th>
+              <th>Direction</th>
+              <th class="num">Gross profit</th>
+              <th class="num">Net profit</th>
+              <th class="num">Annualized</th>
+              <th class="num">Slippage</th>
+              <th class="num">Depth</th>
+              <th class="num">Capital</th>
+              <th>Status</th>
+              <th>Risk tags</th>
+            </tr>
+          </thead>
+          <tbody>
+
+          <tr>
+            <td colspan="14" class="empty">No opportunities match the current filters.</td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
