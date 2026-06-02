@@ -41,12 +41,19 @@ def calculate_implied_futures_basis(
     actual_market_state: PerpetualMarketState | None = None,
     discount_factor: str = "1",
     size: str = "1",
+    contract_type: str = "linear",
 ) -> ImpliedFuturesBasisOpportunity | None:
     _validate_inputs(option_pair, call_quote, put_quote, actual_quote, actual_market_state)
 
     strike = Decimal(option_pair.strike)
-    discounted_strike = strike * Decimal(discount_factor)
     trade_size = _positive_decimal(size, "size")
+
+    if contract_type == "inverse":
+        return _calculate_inverse_basis(
+            option_pair, call_quote, put_quote, actual_quote, actual_market_state, strike, trade_size
+        )
+
+    discounted_strike = strike * Decimal(discount_factor)
 
     implied_ask = Decimal(call_quote.best_ask_price) - Decimal(put_quote.best_bid_price) + discounted_strike
     buy_implied_profit = Decimal(actual_quote.best_bid_price) - implied_ask
@@ -129,8 +136,8 @@ def _validate_inputs(
         raise ValueError("call quote does not match call instrument")
     if put_quote.instrument_key != option_pair.put.instrument_key:
         raise ValueError("put quote does not match put instrument")
-    if actual_quote.market_type not in {"perpetual", "future"}:
-        raise ValueError("actual quote market_type must be perpetual or future")
+    if actual_quote.market_type not in {"perpetual", "future", "spot"}:
+        raise ValueError("actual quote market_type must be perpetual, future, or spot")
     if actual_market_state is not None and actual_market_state.instrument_key != actual_quote.instrument_key:
         raise ValueError("actual market state does not match actual quote")
 
@@ -157,3 +164,78 @@ def _positive_decimal(value: str, field_name: str) -> Decimal:
     if decimal <= 0:
         raise ValueError(f"{field_name} must be greater than zero")
     return decimal
+
+
+def _calculate_inverse_basis(
+    option_pair: OptionPair,
+    call_quote: ExecutableQuote,
+    put_quote: ExecutableQuote,
+    actual_quote: ExecutableQuote,
+    actual_market_state: PerpetualMarketState | None,
+    strike: Decimal,
+    trade_size: Decimal,
+) -> ImpliedFuturesBasisOpportunity | None:
+    """Implied futures basis for inverse (BTC-settled) options.
+
+    Inverse PCP:  C_btc - P_btc = 1 - K / F_usd
+    Therefore:    F_implied = K / (1 - C + P)
+    """
+    one = Decimal("1")
+    denom_ask = one - Decimal(call_quote.best_ask_price) + Decimal(put_quote.best_bid_price)
+    denom_bid = one - Decimal(call_quote.best_bid_price) + Decimal(put_quote.best_ask_price)
+
+    implied_ask = strike / denom_ask if denom_ask > 0 else None
+    implied_bid = strike / denom_bid if denom_bid > 0 else None
+
+    buy_implied_profit = Decimal("0") if implied_ask is None else Decimal(actual_quote.best_bid_price) - implied_ask
+    sell_implied_profit = Decimal("0") if implied_bid is None else implied_bid - Decimal(actual_quote.best_ask_price)
+
+    if buy_implied_profit <= 0 and sell_implied_profit <= 0:
+        return None
+
+    risk_tags = _risk_tags(actual_quote, actual_market_state)
+    risk_tags.append("inverse_settlement")
+
+    if buy_implied_profit >= sell_implied_profit:
+        return ImpliedFuturesBasisOpportunity(
+            exchange=option_pair.exchange,
+            underlying_id=option_pair.underlying_id,
+            expiry_time_ms=option_pair.expiry_time_ms,
+            strike=option_pair.strike,
+            direction="buy_implied_sell_actual",
+            implied_futures_price=str(implied_ask),
+            actual_futures_price=actual_quote.best_bid_price,
+            basis=str(buy_implied_profit),
+            gross_profit=str(buy_implied_profit * trade_size),
+            funding_rate_current=None if actual_market_state is None else actual_market_state.funding_rate_current,
+            funding_rate_8h=None if actual_market_state is None else actual_market_state.funding_rate_8h,
+            funding_rate_annualized=None if actual_market_state is None else actual_market_state.funding_rate_annualized,
+            risk_tags=risk_tags,
+            legs=[
+                ArbitrageLeg(call_quote.instrument_key, "buy", call_quote.best_ask_price, str(trade_size), "call"),
+                ArbitrageLeg(put_quote.instrument_key, "sell", put_quote.best_bid_price, str(trade_size), "put"),
+                ArbitrageLeg(actual_quote.instrument_key, "sell", actual_quote.best_bid_price, str(trade_size), "actual_future"),
+            ],
+            explanation="Inverse: implied forward is below actual bid; buy implied, sell actual.",
+        )
+    return ImpliedFuturesBasisOpportunity(
+        exchange=option_pair.exchange,
+        underlying_id=option_pair.underlying_id,
+        expiry_time_ms=option_pair.expiry_time_ms,
+        strike=option_pair.strike,
+        direction="sell_implied_buy_actual",
+        implied_futures_price=str(implied_bid),
+        actual_futures_price=actual_quote.best_ask_price,
+        basis=str(sell_implied_profit),
+        gross_profit=str(sell_implied_profit * trade_size),
+        funding_rate_current=None if actual_market_state is None else actual_market_state.funding_rate_current,
+        funding_rate_8h=None if actual_market_state is None else actual_market_state.funding_rate_8h,
+        funding_rate_annualized=None if actual_market_state is None else actual_market_state.funding_rate_annualized,
+        risk_tags=risk_tags,
+        legs=[
+            ArbitrageLeg(call_quote.instrument_key, "sell", call_quote.best_bid_price, str(trade_size), "call"),
+            ArbitrageLeg(put_quote.instrument_key, "buy", put_quote.best_ask_price, str(trade_size), "put"),
+            ArbitrageLeg(actual_quote.instrument_key, "buy", actual_quote.best_ask_price, str(trade_size), "actual_future"),
+        ],
+        explanation="Inverse: implied forward is above actual ask; sell implied, buy actual.",
+    )

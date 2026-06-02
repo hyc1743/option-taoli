@@ -17,7 +17,7 @@ def opportunity(*, gross_profit: str = "50", expiry_time_ms: int = 1811744000000
     )
 
 
-def test_adjusts_gross_profit_for_fees_slippage_and_capital_usage():
+def test_tracks_fees_and_capital_without_adjusting_gross_profit():
     adjusted = apply_opportunity_adjustments(
         opportunity(gross_profit="200"),
         fee_rate="0.0001",
@@ -30,16 +30,16 @@ def test_adjusts_gross_profit_for_fees_slippage_and_capital_usage():
 
     assert adjusted.gross_profit == "200"
     assert adjusted.total_fees == "11.0050"
-    assert adjusted.total_slippage == "4.0"
+    assert adjusted.total_slippage == "0"
     assert adjusted.funding_impact == "0"
     assert adjusted.capital_required == "11005.0"
-    assert adjusted.net_profit == "184.9950"
-    assert adjusted.net_return == "0.01681008632439800090867787369"
+    assert adjusted.net_profit == "200"
+    assert adjusted.net_return == "0.01817355747387551113130395275"
     assert adjusted.is_executable is True
     assert adjusted.risk_tags == []
 
 
-def test_uses_depth_fill_for_slippage_and_marks_incomplete_fill_not_executable():
+def test_uses_depth_fill_only_to_mark_incomplete_fill_not_executable():
     adjusted = apply_opportunity_adjustments(
         opportunity(gross_profit="100"),
         fee_rate="0",
@@ -65,8 +65,8 @@ def test_uses_depth_fill_for_slippage_and_marks_incomplete_fill_not_executable()
         },
     )
 
-    assert adjusted.total_slippage == "13.0"
-    assert adjusted.net_profit == "87.0"
+    assert adjusted.total_slippage == "0"
+    assert adjusted.net_profit == "100"
     assert adjusted.is_executable is False
     assert "insufficient_depth" in adjusted.risk_tags
 
@@ -83,8 +83,8 @@ def test_applies_perpetual_funding_impact_and_annualized_net_return():
     )
 
     assert adjusted.funding_impact == "-19.0200"
-    assert adjusted.net_profit == "139.0200"
+    assert adjusted.net_profit == "120"
     assert adjusted.capital_required == "22010.0"
-    assert adjusted.net_return == "0.006316219900045433893684688778"
-    assert adjusted.annualized_net_return == "0.2305420263516583371194911404"
+    assert adjusted.net_return == "0.005452067242162653339391185825"
+    assert adjusted.annualized_net_return == "0.1990004543389368468877782826"
     assert "funding_credit_assumed" in adjusted.risk_tags

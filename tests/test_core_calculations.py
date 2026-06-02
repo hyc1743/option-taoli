@@ -143,7 +143,7 @@ def test_implied_futures_basis_applies_discount_factor_and_size_to_basis_profit(
     assert [leg.size for leg in opportunity.legs] == ["2", "2", "2"]
 
 
-def test_adjusted_core_opportunities_can_be_filtered_and_sorted_by_net_metrics():
+def test_adjusted_core_opportunities_are_filtered_and_sorted_by_gross_profit():
     high_gross = SimpleNamespace(
         name="high-gross",
         opportunity_type="put_call_parity",
@@ -196,5 +196,5 @@ def test_adjusted_core_opportunities_can_be_filtered_and_sorted_by_net_metrics()
     )
     sorted_opportunities = sort_opportunities(filtered)
 
-    assert [opportunity.name for opportunity in sorted_opportunities] == ["high-net"]
-    assert sorted_opportunities[0].adjustments.net_profit == "150"
+    assert [opportunity.name for opportunity in sorted_opportunities] == ["high-gross", "high-net"]
+    assert sorted_opportunities[0].adjustments.net_profit == "300"

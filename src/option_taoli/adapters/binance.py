@@ -126,6 +126,26 @@ class BinanceAdapter:
             raw=raw,
         )
 
+    def normalize_usdm_book_ticker(self, raw: dict[str, Any]) -> Quote:
+        instrument_id = self._required_str(raw, "symbol")
+        bid_price = self._decimal_string(raw.get("bidPrice"))
+        ask_price = self._decimal_string(raw.get("askPrice"))
+
+        return Quote(
+            instrument_key=self._instrument_key("perpetual", instrument_id),
+            exchange="binance",
+            market_type="perpetual",
+            instrument_id=instrument_id,
+            bid_price=bid_price,
+            ask_price=ask_price,
+            bid_size=self._decimal_string(raw.get("bidQty")),
+            ask_size=self._decimal_string(raw.get("askQty")),
+            mid_price=self._mid_price(bid_price, ask_price),
+            received_at_ms=self._received_at_ms,
+            normalized_at_ms=self._normalized_at_ms,
+            raw=raw,
+        )
+
     def normalize_option_mark_quote(self, raw: dict[str, Any]) -> Quote:
         instrument_id = self._required_value_as_str(self._first_present(raw, "symbol", "s"), "symbol")
         bid_price = self._decimal_string(self._first_present(raw, "bidPrice", "bo"))

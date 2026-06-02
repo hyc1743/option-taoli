@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from html import escape
+import re
 from typing import Iterable
 
 from option_taoli.opportunity_filters import OpportunityFilter, filter_opportunities
@@ -26,7 +27,7 @@ def render_opportunity_list_html(
     if not rows:
         rows = """
           <tr>
-            <td colspan="14" class="empty">No opportunities match the current filters.</td>
+            <td colspan="12" class="empty">No opportunities match the current filters.</td>
           </tr>"""
 
     return f"""<!doctype html>
@@ -71,7 +72,7 @@ def render_opportunity_list_html(
       border-right: 1px solid var(--line);
       padding: 10px;
       text-align: left;
-      vertical-align: top;
+      vertical-align: middle;
       white-space: nowrap;
     }}
     th {{
@@ -129,11 +130,8 @@ def render_opportunity_list_html(
               <th>Underlying</th>
               <th>Expiry</th>
               <th>Strike</th>
-              <th>Direction</th>
-              <th class="num">Gross profit</th>
-              <th class="num">Net profit</th>
+              <th class="num">Profit</th>
               <th class="num">Annualized</th>
-              <th class="num">Slippage</th>
               <th class="num">Depth</th>
               <th class="num">Capital</th>
               <th>Status</th>
@@ -212,12 +210,18 @@ def render_opportunity_detail_html(
     }}
     .legs {{
       width: 100%;
-      min-width: 0;
+      min-width: 760px;
       border-collapse: collapse;
     }}
     .legs th, .legs td {{
       white-space: normal;
     }}
+    .leg-action {{
+      font-weight: 700;
+      text-transform: uppercase;
+    }}
+    .side-buy {{ color: var(--signal); }}
+    .side-sell {{ color: var(--danger); }}
     .tags {{
       min-height: 30px;
     }}
@@ -248,7 +252,7 @@ def render_opportunity_detail_html(
               ("Exchange", _value(candidate, "exchange")),
               ("Underlying", _value(candidate, "underlying_id")),
               ("Expiry", _date_label(_value(candidate, "expiry_time_ms"))),
-              ("Strike", _value(candidate, "strike") or _strike_range(candidate)),
+              ("Strike", _format_strike(_value(candidate, "strike")) or _strike_range(candidate)),
               ("Direction", _value(candidate, "direction")),
               ("Status", status),
           ])}
@@ -257,10 +261,8 @@ def render_opportunity_detail_html(
           <h2>Economics</h2>
           {_render_key_values([
               ("Gross profit", _value(candidate, "gross_profit")),
-              ("Net profit", _metric(candidate, "net_profit", fallback_field="gross_profit")),
-              ("Annualized net return", _percent(_metric(candidate, "annualized_net_return", fallback_field="annualized_return"))),
+              ("Annualized return", _percent(_metric(candidate, "annualized_net_return", fallback_field="annualized_return"))),
               ("Total fees", _value(candidate, "total_fees")),
-              ("Total slippage", _value(candidate, "total_slippage")),
               ("Funding impact", _value(candidate, "funding_impact")),
               ("Capital required", _value(candidate, "capital_required")),
           ])}
@@ -367,12 +369,12 @@ def _base_css() -> str:
 def _render_filters() -> str:
     return """<section class="filters" aria-label="Opportunity filters">
         <label>Arbitrage type<select name="opportunity_type"><option>All</option><option>put_call_parity</option><option>box_spread</option><option>implied_futures_basis</option></select></label>
+        <label>PCP mode<select name="pcp_execution_mode"><option>All</option><option>same_exchange</option><option>cross_exchange</option></select></label>
         <label>Exchange<select name="exchange"><option>All</option><option>deribit</option><option>binance</option><option>okx</option><option>bybit</option></select></label>
         <label>Underlying<input name="underlying" type="text" placeholder="BTC"></label>
         <label>Expiry<input name="expiry" type="date"></label>
-        <label>Min net profit<input name="min_net_profit" type="number" step="0.01"></label>
+        <label>Min gross profit<input name="min_net_profit" type="number" step="0.01"></label>
         <label>Min annualized<input name="min_annualized" type="number" step="0.0001"></label>
-        <label>Max slippage<input name="max_slippage" type="number" step="0.01"></label>
         <label>Min depth<input name="min_depth" type="number" step="0.01"></label>
       </section>"""
 
@@ -404,25 +406,24 @@ def _price_relationships(candidate: object) -> list[tuple[str, object | None]]:
 def _render_legs(candidate: object) -> str:
     legs = _value(candidate, "legs") or []
     rows = "\n".join(
-        f"""            <tr>
-              <td>{_text(getattr(leg, "role", None))}</td>
-              <td>{_text(getattr(leg, "side", None))}</td>
-              <td>{_text(getattr(leg, "instrument_key", None))}</td>
-              <td class="num">{_text(getattr(leg, "price", None))}</td>
-              <td class="num">{_text(getattr(leg, "size", None))}</td>
-            </tr>"""
-        for leg in legs
+        _render_leg_row(candidate, leg, index)
+        for index, leg in enumerate(legs, start=1)
     )
     if not rows:
         rows = """            <tr>
-              <td colspan="5" class="empty">No execution legs available.</td>
+              <td colspan="10" class="empty">No execution legs available.</td>
             </tr>"""
     return f"""<table class="legs">
             <thead>
               <tr>
+                <th>#</th>
+                <th>Action</th>
+                <th>Exchange</th>
+                <th>Market</th>
+                <th>Contract</th>
+                <th>Expiry</th>
+                <th>Strike</th>
                 <th>Role</th>
-                <th>Side</th>
-                <th>Instrument</th>
                 <th class="num">Price</th>
                 <th class="num">Size</th>
               </tr>
@@ -431,6 +432,75 @@ def _render_legs(candidate: object) -> str:
 {rows}
             </tbody>
           </table>"""
+
+
+def _render_leg_row(candidate: object, leg: object, index: int) -> str:
+    instrument = _parse_instrument_key(getattr(leg, "instrument_key", None))
+    side = str(getattr(leg, "side", "") or "")
+    side_class = "side-buy" if side == "buy" else "side-sell" if side == "sell" else ""
+    action = _action_label(side)
+    strike = _leg_strike(candidate, leg, instrument)
+    return (
+        f"""            <tr>
+              <td class="num">{index}</td>
+              <td><span class="leg-action {side_class}">{_text(action)}</span></td>
+              <td>{_text(instrument["exchange"])}</td>
+              <td>{_text(instrument["market"])}</td>
+              <td title="{_text(getattr(leg, "instrument_key", None))}">{_text(instrument["contract"])}</td>
+              <td>{_text(_date_label(_value(candidate, "expiry_time_ms")))}</td>
+              <td>{_text(_format_strike(strike))}</td>
+              <td>{_text(getattr(leg, "role", None))}</td>
+              <td class="num">{_text(getattr(leg, "price", None))}</td>
+              <td class="num">{_text(getattr(leg, "size", None))}</td>
+            </tr>"""
+    )
+
+
+def _parse_instrument_key(value: object | None) -> dict[str, str | None]:
+    if value is None:
+        return {"exchange": None, "market": None, "contract": None}
+    parts = str(value).split(":", 2)
+    return {
+        "exchange": parts[0] if len(parts) > 0 else None,
+        "market": parts[1] if len(parts) > 1 else None,
+        "contract": parts[2] if len(parts) > 2 else str(value),
+    }
+
+
+def _action_label(side: str) -> str:
+    if side == "buy":
+        return "Buy"
+    if side == "sell":
+        return "Sell"
+    return side
+
+
+def _leg_strike(candidate: object, leg: object, instrument: dict[str, str | None]) -> str | None:
+    role = str(getattr(leg, "role", "") or "")
+    if role.startswith("lower_"):
+        return _string_or_none(_value(candidate, "lower_strike"))
+    if role.startswith("upper_"):
+        return _string_or_none(_value(candidate, "upper_strike"))
+    if role in {"call", "put"}:
+        return _string_or_none(_value(candidate, "strike"))
+    if instrument["market"] == "option":
+        return _strike_from_contract(instrument["contract"])
+    return None
+
+
+def _strike_from_contract(contract: str | None) -> str | None:
+    if not contract:
+        return None
+    for segment in contract.split("-"):
+        if re.fullmatch(r"\d+(?:\.\d+)?", segment):
+            return segment
+    return None
+
+
+def _string_or_none(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _render_row(candidate: object) -> str:
@@ -444,12 +514,9 @@ def _render_row(candidate: object) -> str:
         _text(_value(candidate, "exchange")),
         _text(_value(candidate, "underlying_id")),
         _text(_date_label(_value(candidate, "expiry_time_ms"))),
-        _text(_value(candidate, "strike"), fallback=_strike_range(candidate)),
-        _text(_value(candidate, "direction")),
+        _text(_format_strike(_value(candidate, "strike")), fallback=_strike_range(candidate)),
         _text(_value(candidate, "gross_profit")),
-        _text(_metric(candidate, "net_profit", fallback_field="gross_profit")),
         _text(_percent(_metric(candidate, "annualized_net_return", fallback_field="annualized_return"))),
-        _text(_value(candidate, "total_slippage")),
         _text(_value(candidate, "min_depth")),
         _text(_value(candidate, "capital_required")),
     ]
@@ -460,13 +527,10 @@ def _render_row(candidate: object) -> str:
               <td>{cells[3]}</td>
               <td>{cells[4]}</td>
               <td>{cells[5]}</td>
-              <td>{cells[6]}</td>
+              <td class="num">{cells[6]}</td>
               <td class="num">{cells[7]}</td>
               <td class="num">{cells[8]}</td>
               <td class="num">{cells[9]}</td>
-              <td class="num">{cells[10]}</td>
-              <td class="num">{cells[11]}</td>
-              <td class="num">{cells[12]}</td>
               <td class="{status_class}">{escape(status)}</td>
               <td>{tag_html}</td>
             </tr>"""
@@ -534,7 +598,19 @@ def _strike_range(candidate: object) -> str | None:
     upper = _value(candidate, "upper_strike")
     if lower is None or upper is None:
         return None
-    return f"{lower}-{upper}"
+    return f"{_format_strike(lower)}-{_format_strike(upper)}"
+
+
+def _format_strike(value: object | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        number = Decimal(str(value))
+    except Exception:
+        return str(value)
+    if number == number.to_integral_value():
+        return str(number.quantize(Decimal("1")))
+    return format(number.normalize(), "f")
 
 
 def _text(value: object | None, *, fallback: object | None = None) -> str:

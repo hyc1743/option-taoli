@@ -9,6 +9,7 @@ def candidate(
     exchange: str = "deribit",
     underlying_id: str = "btc_usd",
     expiry_time_ms: int = 1811744000000,
+    gross_profit: str = "100",
     net_profit: str = "100",
     annualized_net_return: str | None = "0.25",
     total_slippage: str = "3",
@@ -20,6 +21,7 @@ def candidate(
         exchange=exchange,
         underlying_id=underlying_id,
         expiry_time_ms=expiry_time_ms,
+        gross_profit=gross_profit,
         net_profit=net_profit,
         annualized_net_return=annualized_net_return,
         total_slippage=total_slippage,
@@ -53,14 +55,14 @@ def wrapped_candidate(
     )
 
 
-def test_filters_by_profit_return_slippage_depth_and_executable_status():
+def test_filters_by_gross_profit_return_depth_and_executable_status():
     opportunities = [
-        candidate(opportunity_type="put_call_parity", net_profit="120", annualized_net_return="0.4"),
-        candidate(opportunity_type="box_spread", net_profit="90", annualized_net_return="0.4"),
-        candidate(opportunity_type="box_spread", net_profit="120", annualized_net_return="0.05"),
-        candidate(opportunity_type="box_spread", net_profit="120", annualized_net_return="0.4", total_slippage="11"),
-        candidate(opportunity_type="box_spread", net_profit="120", annualized_net_return="0.4", min_depth="0.5"),
-        candidate(opportunity_type="box_spread", net_profit="120", annualized_net_return="0.4", is_executable=False),
+        candidate(opportunity_type="put_call_parity", gross_profit="120", net_profit="1", annualized_net_return="0.4"),
+        candidate(opportunity_type="box_spread", gross_profit="90", net_profit="900", annualized_net_return="0.4"),
+        candidate(opportunity_type="box_spread", gross_profit="120", net_profit="1", annualized_net_return="0.05"),
+        candidate(opportunity_type="box_spread", gross_profit="120", net_profit="1", annualized_net_return="0.4", total_slippage="999"),
+        candidate(opportunity_type="box_spread", gross_profit="120", net_profit="1", annualized_net_return="0.4", min_depth="0.5"),
+        candidate(opportunity_type="box_spread", gross_profit="120", net_profit="1", annualized_net_return="0.4", is_executable=False),
     ]
 
     filtered = filter_opportunities(
@@ -74,7 +76,7 @@ def test_filters_by_profit_return_slippage_depth_and_executable_status():
         ),
     )
 
-    assert filtered == [opportunities[0]]
+    assert filtered == [opportunities[0], opportunities[3]]
 
 
 def test_filters_by_exchange_underlying_expiry_and_type_on_wrapped_candidates():
@@ -100,6 +102,23 @@ def test_filters_by_exchange_underlying_expiry_and_type_on_wrapped_candidates():
     )
 
     assert filtered == [opportunities[0]]
+
+
+def test_filters_put_call_parity_by_execution_mode_without_hiding_other_types():
+    opportunities = [
+        candidate(opportunity_type="put_call_parity"),
+        candidate(opportunity_type="put_call_parity", exchange="cross_exchange"),
+        candidate(opportunity_type="box_spread"),
+    ]
+    opportunities[0].pcp_execution_mode = "same_exchange"
+    opportunities[1].pcp_execution_mode = "cross_exchange"
+
+    filtered = filter_opportunities(
+        opportunities,
+        OpportunityFilter(pcp_execution_modes={"cross_exchange"}),
+    )
+
+    assert filtered == [opportunities[1], opportunities[2]]
 
 
 def test_falls_back_to_gross_profit_and_keeps_unknown_optional_metrics():

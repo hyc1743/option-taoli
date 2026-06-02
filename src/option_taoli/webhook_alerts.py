@@ -92,10 +92,8 @@ def build_webhook_payload(opportunity: object, *, sent_at_ms: int) -> dict:
             "strike": _value(opportunity, "strike") or _strike_range(opportunity),
             "direction": _value(opportunity, "direction"),
             "gross_profit": _value(opportunity, "gross_profit"),
-            "net_profit": _value(opportunity, "net_profit") or _value(opportunity, "gross_profit"),
             "annualized_net_return": _value(opportunity, "annualized_net_return")
             or _value(opportunity, "annualized_return"),
-            "total_slippage": _value(opportunity, "total_slippage"),
             "capital_required": _value(opportunity, "capital_required"),
             "is_executable": _value(opportunity, "is_executable"),
             "risk_tags": _risk_tags(opportunity),

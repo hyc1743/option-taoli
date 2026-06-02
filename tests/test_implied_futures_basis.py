@@ -224,5 +224,12 @@ def test_rejects_mismatched_quotes_and_unsupported_actual_market_type():
     with pytest.raises(ValueError, match="put quote does not match put instrument"):
         calculate_implied_futures_basis(complete_pair(), call_quote, wrong_put_quote, spot_quote)
 
-    with pytest.raises(ValueError, match="actual quote market_type must be perpetual or future"):
-        calculate_implied_futures_basis(complete_pair(), call_quote, put_quote, spot_quote)
+    with pytest.raises(ValueError, match="actual quote market_type must be perpetual, future, or spot"):
+        index_q = executable_quote(
+            instrument_key="deribit:index:BTC_USDC",
+            instrument_id="BTC_USDC",
+            market_type="index",
+            bid="95000",
+            ask="95100",
+        )
+        calculate_implied_futures_basis(complete_pair(), call_quote, put_quote, index_q)

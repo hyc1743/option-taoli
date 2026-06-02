@@ -56,8 +56,10 @@ def test_sends_telegram_message_with_official_send_message_payload():
     assert "put_call_parity" in payload["text"]
     assert "deribit" in payload["text"]
     assert "btc_usd" in payload["text"]
-    assert "Net profit: 120" in payload["text"]
-    assert "Annualized net return: 42.00%" in payload["text"]
+    assert "Gross profit: 150" in payload["text"]
+    assert "Net profit" not in payload["text"]
+    assert "Slippage" not in payload["text"]
+    assert "Annualized return: 42.00%" in payload["text"]
     assert "funding_cost_assumed" in payload["text"]
 
 
@@ -79,7 +81,8 @@ def test_records_successful_telegram_alert_in_history_store(tmp_path):
     assert alerts[0].channel == "telegram"
     assert alerts[0].sent_at_ms == 1810880010000
     assert alerts[0].status == "sent"
-    assert "Net profit: 120" in alerts[0].message
+    assert "Gross profit: 150" in alerts[0].message
+    assert "Net profit" not in alerts[0].message
 
 
 def test_records_failed_telegram_alert_and_exposes_error(tmp_path):

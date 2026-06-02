@@ -60,7 +60,9 @@ def test_posts_structured_webhook_payload_with_headers():
     assert payload["opportunity"]["type"] == "implied_futures_basis"
     assert payload["opportunity"]["exchange"] == "okx"
     assert payload["opportunity"]["underlying_id"] == "BTC-USD"
-    assert payload["opportunity"]["net_profit"] == "120"
+    assert payload["opportunity"]["gross_profit"] == "150"
+    assert "net_profit" not in payload["opportunity"]
+    assert "total_slippage" not in payload["opportunity"]
     assert payload["opportunity"]["annualized_net_return"] == "0.42"
     assert payload["opportunity"]["is_executable"] is True
     assert payload["opportunity"]["risk_tags"] == ["funding_rate_present"]

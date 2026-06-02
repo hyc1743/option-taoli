@@ -8,5 +8,6 @@ build/
 .env
 .venv/
 venv/
+node_modules/
 *.egg
 .DS_Store

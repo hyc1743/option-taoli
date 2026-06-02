@@ -256,10 +256,10 @@ def _snapshot_from_candidate(candidate: object, *, observed_at_ms: int) -> Oppor
         strike=_string_value(candidate, "strike") or _strike_range(candidate),
         direction=_string_value(candidate, "direction"),
         gross_profit=_string_value(candidate, "gross_profit"),
-        net_profit=_string_value(candidate, "net_profit") or _string_value(candidate, "gross_profit"),
+        net_profit=None,
         annualized_net_return=_string_value(candidate, "annualized_net_return")
         or _string_value(candidate, "annualized_return"),
-        total_slippage=_string_value(candidate, "total_slippage"),
+        total_slippage=None,
         capital_required=_string_value(candidate, "capital_required"),
         is_executable=_bool_value(candidate, "is_executable"),
         risk_tags=_risk_tags(candidate),

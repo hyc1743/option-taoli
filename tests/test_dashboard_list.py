@@ -69,9 +69,14 @@ def test_renders_opportunity_list_with_filters_metrics_and_risk_tags():
     assert "Option Arbitrage Monitor" in html
     assert "Arbitrage type" in html
     assert "Exchange" in html
+    assert "PCP mode" in html
     assert "Underlying" in html
-    assert "Min net profit" in html
-    assert "Max slippage" in html
+    assert "Expiry" in html
+    assert "Direction" not in html
+    assert "Gross profit" not in html
+    assert "Profit" in html
+    assert "Min gross profit" in html
+    assert "Max slippage" not in html
     assert "put_call_parity" in html
     assert "box_spread" in html
     assert "deribit" in html
@@ -79,7 +84,7 @@ def test_renders_opportunity_list_with_filters_metrics_and_risk_tags():
     assert "btc_usd" in html
     assert "BTC-USD" in html
     assert "2027-05-31" in html
-    assert "120" in html
+    assert "150" in html
     assert "42.00%" in html
     assert "25000" in html
     assert "Executable" in html
@@ -99,6 +104,7 @@ def test_dashboard_applies_filters_and_sorting_before_rendering_rows():
             exchange="deribit",
             underlying_id="btc_usd",
             expiry_time_ms=1811744000000,
+            gross_profit="60",
             net_profit="60",
             annualized_net_return="0.1",
         ),
@@ -108,6 +114,7 @@ def test_dashboard_applies_filters_and_sorting_before_rendering_rows():
             exchange="deribit",
             underlying_id="btc_usd",
             expiry_time_ms=1811744000000,
+            gross_profit="150",
             net_profit="150",
             annualized_net_return="0.8",
         ),
@@ -117,6 +124,7 @@ def test_dashboard_applies_filters_and_sorting_before_rendering_rows():
             exchange="deribit",
             underlying_id="btc_usd",
             expiry_time_ms=1811744000000,
+            gross_profit="180",
             net_profit="180",
             annualized_net_return="0.4",
         ),
@@ -151,3 +159,21 @@ def test_dashboard_escapes_dynamic_values():
     assert "bad&lt;exchange&gt;" in html
     assert "BTC&lt;USD&gt;" in html
     assert "tag&lt;script&gt;" in html
+
+
+def test_dashboard_formats_integral_strikes_without_decimal_suffix():
+    html = render_opportunity_list_html(
+        [
+            candidate(
+                "pcp",
+                opportunity_type="put_call_parity",
+                exchange="deribit",
+                underlying_id="btc_usd",
+                expiry_time_ms=1811744000000,
+                strike="100000.000",
+            )
+        ]
+    )
+
+    assert ">100000<" in html
+    assert "100000.000" not in html

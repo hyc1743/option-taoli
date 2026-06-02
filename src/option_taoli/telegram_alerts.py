@@ -93,9 +93,7 @@ def format_telegram_opportunity_message(opportunity: object) -> str:
         f"Expiry: {_html(_value(opportunity, 'expiry_time_ms'))}",
         f"Direction: {_html(_value(opportunity, 'direction'))}",
         f"Gross profit: {_html(_value(opportunity, 'gross_profit'))}",
-        f"Net profit: {_html(_value(opportunity, 'net_profit') or _value(opportunity, 'gross_profit'))}",
-        f"Annualized net return: {_html(_percent(_value(opportunity, 'annualized_net_return') or _value(opportunity, 'annualized_return')))}",
-        f"Slippage: {_html(_value(opportunity, 'total_slippage'))}",
+        f"Annualized return: {_html(_percent(_value(opportunity, 'annualized_net_return') or _value(opportunity, 'annualized_return')))}",
         f"Capital required: {_html(_value(opportunity, 'capital_required'))}",
         f"Status: {'Executable' if _value(opportunity, 'is_executable') is not False else 'Blocked'}",
     ]

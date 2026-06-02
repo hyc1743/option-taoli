@@ -6,9 +6,8 @@ from typing import Iterable, Literal
 
 
 SortMetric = Literal[
-    "net_profit",
+    "gross_profit",
     "annualized_net_return",
-    "total_slippage",
     "min_depth",
     "expiry_time_ms",
     "capital_required",
@@ -17,7 +16,7 @@ SortMetric = Literal[
 
 @dataclass(frozen=True)
 class OpportunitySort:
-    primary: SortMetric = "net_profit"
+    primary: SortMetric = "gross_profit"
     descending: bool = True
 
 
@@ -35,9 +34,8 @@ def sort_opportunities(opportunities: Iterable[object], sort: OpportunitySort | 
 def _default_sort_key(candidate: object) -> tuple[object, ...]:
     return (
         _value(candidate, "is_executable") is False,
-        -_decimal_metric(candidate, "net_profit", fallback_field="gross_profit", default=Decimal("0")),
+        -_decimal_metric(candidate, "gross_profit", default=Decimal("0")),
         -_decimal_metric(candidate, "annualized_net_return", fallback_field="annualized_return", default=Decimal("0")),
-        _decimal_metric(candidate, "total_slippage", default=Decimal("0")),
         -_decimal_metric(candidate, "min_depth", default=Decimal("0")),
         _integer_metric(candidate, "expiry_time_ms", default=0),
     )
@@ -49,7 +47,9 @@ def _custom_sort_key(candidate: object, metric: SortMetric, descending: bool) ->
     elif metric == "annualized_net_return":
         value = _decimal_metric(candidate, metric, fallback_field="annualized_return", default=Decimal("0"))
     elif metric == "net_profit":
-        value = _decimal_metric(candidate, metric, fallback_field="gross_profit", default=Decimal("0"))
+        value = _decimal_metric(candidate, "gross_profit", default=Decimal("0"))
+    elif metric == "total_slippage":
+        value = Decimal("0")
     else:
         value = _decimal_metric(candidate, metric, default=Decimal("0"))
 

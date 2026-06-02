@@ -80,8 +80,9 @@ def test_records_created_updated_and_disappeared_timeline(tmp_path):
 
     timeline = store.timeline(opportunity_id)
     assert [event.event_type for event in timeline] == ["created", "updated", "disappeared"]
-    assert timeline[0].snapshot.net_profit == "120"
-    assert timeline[1].snapshot.net_profit == "140"
+    assert timeline[0].snapshot.net_profit is None
+    assert timeline[1].snapshot.net_profit is None
+    assert timeline[0].snapshot.total_slippage is None
     assert timeline[1].snapshot.risk_tags == ["funding_cost_assumed"]
     assert timeline[1].snapshot.legs[0]["instrument_key"] == "deribit:option:BTC-C"
     assert timeline[2].snapshot.is_active is False
@@ -104,7 +105,8 @@ def test_persists_wrapped_opportunity_snapshot_and_reopens_store(tmp_path):
     assert snapshot.implied_futures_price == "95050"
     assert snapshot.actual_futures_price == "95100"
     assert snapshot.basis == "50"
-    assert snapshot.net_profit == "41"
+    assert snapshot.net_profit is None
+    assert snapshot.total_slippage is None
     assert snapshot.annualized_net_return == "0.22"
     assert snapshot.risk_tags == ["funding_credit_assumed"]
     assert snapshot.legs == [{"instrument_key": "okx:option:BTC-C", "side": "buy", "price": "5000", "size": "1", "role": "call"}]

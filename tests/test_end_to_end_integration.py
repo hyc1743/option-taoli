@@ -33,7 +33,7 @@ def test_deribit_put_call_parity_opportunity_flows_to_dashboard_and_webhook_aler
             "expiration_timestamp": 1811744000000,
             "strike": "100000",
             "option_type": "call",
-            "instrument_type": "reversed",
+            "instrument_type": "linear",
             "settlement_period": "month",
             "contract_size": "1",
             "tick_size": "0.5",
@@ -47,11 +47,11 @@ def test_deribit_put_call_parity_opportunity_flows_to_dashboard_and_webhook_aler
             "kind": "option",
             "base_currency": "BTC",
             "quote_currency": "USD",
-            "settlement_currency": "BTC",
+            "settlement_currency": "USD",
             "expiration_timestamp": 1811744000000,
             "strike": "100000",
             "option_type": "put",
-            "instrument_type": "reversed",
+            "instrument_type": "linear",
             "settlement_period": "month",
             "contract_size": "1",
             "tick_size": "0.5",
@@ -148,5 +148,7 @@ def test_deribit_put_call_parity_opportunity_flows_to_dashboard_and_webhook_aler
     assert "deribit-btc-pcp" in html
     assert "put_call_parity" in html
     assert result.status == "sent"
-    assert webhook_http.calls[0][1]["opportunity"]["net_profit"] == adjusted.net_profit
+    assert webhook_http.calls[0][1]["opportunity"]["gross_profit"] == opportunity.gross_profit
+    assert "net_profit" not in webhook_http.calls[0][1]["opportunity"]
+    assert "total_slippage" not in webhook_http.calls[0][1]["opportunity"]
     assert webhook_http.calls[0][1]["opportunity"]["type"] == "put_call_parity"

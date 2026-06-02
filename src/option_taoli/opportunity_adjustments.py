@@ -44,9 +44,9 @@ def apply_opportunity_adjustments(
 
     leg_notionals = [_leg_notional(leg) for leg in legs]
     total_fees = sum((notional * rate for notional in leg_notionals), Decimal("0"))
-    total_slippage, depth_is_executable = _slippage_cost(
+    _, depth_is_executable = _slippage_cost(
         legs,
-        slippage_costs_by_instrument_key or {},
+        {},
         depth_fills_by_instrument_key or {},
     )
     funding_impact, funding_tags = _funding_impact(
@@ -56,7 +56,8 @@ def apply_opportunity_adjustments(
         funding_interval_hours=funding_interval_hours,
     )
     capital_required = sum((notional * capital_rate for notional in leg_notionals), Decimal("0"))
-    net_profit = gross_profit - total_fees - total_slippage - funding_impact
+    total_slippage = Decimal("0")
+    net_profit = gross_profit
     net_return = None if capital_required <= 0 else str(net_profit / capital_required)
 
     annualized_net_return = None
@@ -70,8 +71,8 @@ def apply_opportunity_adjustments(
     if not depth_is_executable:
         risk_tags.append("insufficient_depth")
     risk_tags.extend(funding_tags)
-    if net_profit <= 0:
-        risk_tags.append("not_profitable_after_adjustments")
+    if gross_profit <= 0:
+        risk_tags.append("not_profitable")
 
     return AdjustedOpportunity(
         gross_profit=str(gross_profit),
@@ -82,7 +83,7 @@ def apply_opportunity_adjustments(
         net_profit=str(net_profit),
         net_return=net_return,
         annualized_net_return=annualized_net_return,
-        is_executable=depth_is_executable and net_profit > 0,
+        is_executable=depth_is_executable and gross_profit > 0,
         risk_tags=risk_tags,
     )
 

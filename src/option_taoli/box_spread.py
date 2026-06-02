@@ -29,6 +29,7 @@ class BoxSpreadOpportunity:
     annualized_return: str | None
     legs: list[ArbitrageLeg]
     explanation: str
+    risk_tags: list[str] | None = None
 
 
 def calculate_box_spreads(
@@ -37,6 +38,8 @@ def calculate_box_spreads(
     *,
     now_ms: int | None = None,
     size: str = "1",
+    contract_type: str = "linear",
+    hedge_price: str | None = None,
 ) -> list[BoxSpreadOpportunity]:
     trade_size = _positive_decimal(size, "size")
     opportunities: list[BoxSpreadOpportunity] = []
@@ -51,35 +54,119 @@ def calculate_box_spreads(
         if quotes is None:
             continue
 
-        fixed_cashflow = Decimal(upper_strike) - Decimal(lower_strike)
-        if fixed_cashflow <= 0:
-            continue
-
-        long_box = _calculate_long_box(
-            expiry=expiry,
-            lower_pair=lower_pair,
-            upper_pair=upper_pair,
-            quotes=quotes,
-            fixed_cashflow=fixed_cashflow,
-            trade_size=trade_size,
-            now_ms=now_ms,
-        )
-        if long_box is not None:
-            opportunities.append(long_box)
-
-        short_box = _calculate_short_box(
-            expiry=expiry,
-            lower_pair=lower_pair,
-            upper_pair=upper_pair,
-            quotes=quotes,
-            fixed_cashflow=fixed_cashflow,
-            trade_size=trade_size,
-            now_ms=now_ms,
-        )
-        if short_box is not None:
-            opportunities.append(short_box)
+        if contract_type == "inverse":
+            opportunities.extend(
+                _box_inverse(expiry, lower_pair, upper_pair, quotes, trade_size, now_ms, hedge_price)
+            )
+        else:
+            fixed_cashflow = Decimal(upper_strike) - Decimal(lower_strike)
+            if fixed_cashflow > 0:
+                long_box = _calculate_long_box(
+                    expiry=expiry, lower_pair=lower_pair, upper_pair=upper_pair,
+                    quotes=quotes, fixed_cashflow=fixed_cashflow, trade_size=trade_size, now_ms=now_ms,
+                )
+                if long_box is not None:
+                    opportunities.append(long_box)
+                short_box = _calculate_short_box(
+                    expiry=expiry, lower_pair=lower_pair, upper_pair=upper_pair,
+                    quotes=quotes, fixed_cashflow=fixed_cashflow, trade_size=trade_size, now_ms=now_ms,
+                )
+                if short_box is not None:
+                    opportunities.append(short_box)
 
     return sorted(opportunities, key=lambda opportunity: Decimal(opportunity.gross_profit), reverse=True)
+
+
+def _box_inverse(
+    expiry: OptionExpiry,
+    lower_pair: OptionPair,
+    upper_pair: OptionPair,
+    quotes: dict[str, ExecutableQuote],
+    trade_size: Decimal,
+    now_ms: int | None,
+    hedge_price: str | None,
+) -> list[BoxSpreadOpportunity]:
+    """Box spread for inverse (BTC-settled) options.
+
+    Payoff at expiry: (K_upper - K_lower) / S_T  BTC
+    In USD terms:     K_upper - K_lower          (fixed!)
+    Entry cost is in BTC; convert to USD via hedge_price.
+    """
+    if hedge_price is None:
+        return []
+    hp = Decimal(hedge_price)
+    if hp <= 0:
+        return []
+
+    fixed_cashflow_usd = Decimal(upper_pair.strike) - Decimal(lower_pair.strike)
+    if fixed_cashflow_usd <= 0:
+        return []
+
+    results: list[BoxSpreadOpportunity] = []
+
+    # Long box: buy lower call, sell upper call, buy upper put, sell lower put
+    entry_btc = (
+        Decimal(quotes["lower_call"].best_ask_price)
+        - Decimal(quotes["upper_call"].best_bid_price)
+        + Decimal(quotes["upper_put"].best_ask_price)
+        - Decimal(quotes["lower_put"].best_bid_price)
+    )
+    entry_usd = entry_btc * hp
+    profit = (fixed_cashflow_usd - entry_usd) * trade_size
+    if profit > 0:
+        results.append(BoxSpreadOpportunity(
+            exchange=expiry.exchange,
+            underlying_id=expiry.underlying_id,
+            expiry_time_ms=expiry.expiry_time_ms,
+            lower_strike=lower_pair.strike,
+            upper_strike=upper_pair.strike,
+            direction="long_box",
+            fixed_cashflow=str(fixed_cashflow_usd * trade_size),
+            entry_value=str(entry_usd * trade_size),
+            gross_profit=str(profit),
+            annualized_return=_annualized_return(profit, entry_usd * trade_size, expiry.expiry_time_ms, now_ms),
+            risk_tags=["inverse_settlement"],
+            legs=[
+                ArbitrageLeg(quotes["lower_call"].instrument_key, "buy", quotes["lower_call"].best_ask_price, str(trade_size), "lower_call"),
+                ArbitrageLeg(quotes["upper_call"].instrument_key, "sell", quotes["upper_call"].best_bid_price, str(trade_size), "upper_call"),
+                ArbitrageLeg(quotes["upper_put"].instrument_key, "buy", quotes["upper_put"].best_ask_price, str(trade_size), "upper_put"),
+                ArbitrageLeg(quotes["lower_put"].instrument_key, "sell", quotes["lower_put"].best_bid_price, str(trade_size), "lower_put"),
+            ],
+            explanation="Inverse long box: fixed USD payoff exceeds USD entry cost (BTC settlement introduces FX risk at expiry).",
+        ))
+
+    # Short box: sell lower call, buy upper call, sell upper put, buy lower put
+    credit_btc = (
+        Decimal(quotes["lower_call"].best_bid_price)
+        - Decimal(quotes["upper_call"].best_ask_price)
+        + Decimal(quotes["upper_put"].best_bid_price)
+        - Decimal(quotes["lower_put"].best_ask_price)
+    )
+    credit_usd = credit_btc * hp
+    profit = (credit_usd - fixed_cashflow_usd) * trade_size
+    if profit > 0:
+        results.append(BoxSpreadOpportunity(
+            exchange=expiry.exchange,
+            underlying_id=expiry.underlying_id,
+            expiry_time_ms=expiry.expiry_time_ms,
+            lower_strike=lower_pair.strike,
+            upper_strike=upper_pair.strike,
+            direction="short_box",
+            fixed_cashflow=str(fixed_cashflow_usd * trade_size),
+            entry_value=str(credit_usd * trade_size),
+            gross_profit=str(profit),
+            annualized_return=_annualized_return(profit, fixed_cashflow_usd * trade_size, expiry.expiry_time_ms, now_ms),
+            risk_tags=["inverse_settlement"],
+            legs=[
+                ArbitrageLeg(quotes["lower_call"].instrument_key, "sell", quotes["lower_call"].best_bid_price, str(trade_size), "lower_call"),
+                ArbitrageLeg(quotes["upper_call"].instrument_key, "buy", quotes["upper_call"].best_ask_price, str(trade_size), "upper_call"),
+                ArbitrageLeg(quotes["upper_put"].instrument_key, "sell", quotes["upper_put"].best_bid_price, str(trade_size), "upper_put"),
+                ArbitrageLeg(quotes["lower_put"].instrument_key, "buy", quotes["lower_put"].best_ask_price, str(trade_size), "lower_put"),
+            ],
+            explanation="Inverse short box: entry credit in USD exceeds fixed payout (BTC settlement introduces FX risk at expiry).",
+        ))
+
+    return results
 
 
 def _calculate_long_box(

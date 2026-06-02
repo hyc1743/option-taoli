@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal
 from time import sleep as default_sleep
-from typing import Callable, Iterable, Protocol
+from typing import Callable, Iterable, Literal, Protocol
 
 from option_taoli.alert_rules import AlertRule, select_alert_candidates
 from option_taoli.box_spread import calculate_box_spreads
@@ -14,12 +15,13 @@ from option_taoli.opportunity_adjustments import AdjustedOpportunity, apply_oppo
 from option_taoli.opportunity_filters import OpportunityFilter, filter_opportunities
 from option_taoli.opportunity_history import OpportunityHistoryStore, OpportunityTimelineEvent
 from option_taoli.opportunity_sorting import OpportunitySort, sort_opportunities
-from option_taoli.option_chain import build_option_chain
+from option_taoli.option_chain import OptionPair, build_option_chain
 from option_taoli.perpetual_market import PerpetualMarketState
 from option_taoli.put_call_parity import calculate_put_call_parity
 
 
 HedgeKey = tuple[str, str]
+PcpExecutionMode = Literal["same_exchange", "cross_exchange"]
 
 
 class OpportunityAlerter(Protocol):
@@ -66,6 +68,7 @@ class MonitoredOpportunity:
     capital_required: str
     is_executable: bool
     risk_tags: list[str]
+    pcp_execution_mode: PcpExecutionMode | None
     opportunity: object
     adjustments: AdjustedOpportunity
 
@@ -186,7 +189,7 @@ class ArbitrageMonitor:
 
     def _calculate_opportunities(self, batch: MarketDataBatch, *, observed_at_ms: int) -> list[object]:
         chain = build_option_chain(batch.instruments)
-        opportunities: list[object] = []
+        opportunities: list[object] = _calculate_cross_exchange_put_call_parity(batch)
 
         for pair in chain.complete_pairs():
             assert pair.call is not None
@@ -197,9 +200,7 @@ class ArbitrageMonitor:
             if call_quote is None or put_quote is None or hedge_quote is None:
                 continue
 
-            pcp = calculate_put_call_parity(pair, call_quote, put_quote, hedge_quote)
-            if pcp is not None:
-                opportunities.append(pcp)
+            contract_type = pair.call.contract_type
 
             market_state = (batch.perpetual_states_by_instrument_key or {}).get(hedge_quote.instrument_key)
             basis = calculate_implied_futures_basis(
@@ -208,13 +209,27 @@ class ArbitrageMonitor:
                 put_quote,
                 hedge_quote,
                 actual_market_state=market_state,
+                contract_type=contract_type,
             )
-            if basis is not None:
+            if basis is not None and _has_executable_hedge_legs(basis):
                 opportunities.append(basis)
 
         for expiry in chain.expiries.values():
+            hedge_quote_for_underlying = batch.hedge_quotes_by_underlying.get(
+                (expiry.exchange, expiry.underlying_id)
+            )
+            hedge_price = (
+                hedge_quote_for_underlying.best_ask_price if hedge_quote_for_underlying else None
+            )
+            contract_type = _expiry_contract_type(expiry)
             opportunities.extend(
-                calculate_box_spreads(expiry, batch.quotes_by_instrument_key, now_ms=observed_at_ms)
+                calculate_box_spreads(
+                    expiry,
+                    batch.quotes_by_instrument_key,
+                    now_ms=observed_at_ms,
+                    contract_type=contract_type,
+                    hedge_price=hedge_price,
+                )
             )
 
         return opportunities
@@ -233,10 +248,7 @@ class ArbitrageMonitor:
         lower_strike = _optional_str(getattr(opportunity, "lower_strike", None))
         upper_strike = _optional_str(getattr(opportunity, "upper_strike", None))
         strike_label = strike or f"{lower_strike}-{upper_strike}"
-        opportunity_id = (
-            f"{getattr(opportunity, 'exchange')}:{opportunity_type}:{getattr(opportunity, 'underlying_id')}:"
-            f"{getattr(opportunity, 'expiry_time_ms')}:{strike_label}:{getattr(opportunity, 'direction')}"
-        )
+        opportunity_id = _opportunity_id(opportunity, opportunity_type, strike_label)
 
         return MonitoredOpportunity(
             opportunity_id=opportunity_id,
@@ -257,6 +269,7 @@ class ArbitrageMonitor:
             capital_required=adjustments.capital_required,
             is_executable=adjustments.is_executable,
             risk_tags=_merged_risk_tags(getattr(opportunity, "risk_tags", []), adjustments.risk_tags),
+            pcp_execution_mode=_pcp_execution_mode(opportunity, opportunity_type),
             opportunity=opportunity,
             adjustments=adjustments,
         )
@@ -288,6 +301,134 @@ def _opportunity_type(opportunity: object) -> str:
     raise ValueError(f"unsupported opportunity type: {class_name}")
 
 
+PcpGroupKey = tuple[str, int, str]
+
+
+def _calculate_cross_exchange_put_call_parity(batch: MarketDataBatch) -> list[object]:
+    groups: dict[PcpGroupKey, dict[str, list[Instrument]]] = {}
+    for instrument in batch.instruments:
+        if not _is_pcp_option(instrument):
+            continue
+        assert instrument.underlying_id is not None
+        assert instrument.expiry_time_ms is not None
+        assert instrument.strike is not None
+        assert instrument.option_type is not None
+        key = (instrument.underlying_id, instrument.expiry_time_ms, instrument.strike)
+        side = "calls" if instrument.option_type == "call" else "puts"
+        groups.setdefault(key, {"calls": [], "puts": []})[side].append(instrument)
+
+    hedges_by_underlying: dict[str, list[ExecutableQuote]] = {}
+    for (_, underlying_id), hedge_quote in batch.hedge_quotes_by_underlying.items():
+        hedges_by_underlying.setdefault(underlying_id, []).append(hedge_quote)
+
+    opportunities: list[object] = []
+    for (underlying_id, expiry_time_ms, strike), group in groups.items():
+        candidates: list[object] = []
+        for call in group["calls"]:
+            call_quote = batch.quotes_by_instrument_key.get(call.instrument_key)
+            if call_quote is None:
+                continue
+            for put in group["puts"]:
+                if call.contract_type != put.contract_type:
+                    continue
+                put_quote = batch.quotes_by_instrument_key.get(put.instrument_key)
+                if put_quote is None:
+                    continue
+                for hedge_quote in hedges_by_underlying.get(underlying_id, []):
+                    pair = OptionPair(
+                        exchange=_pcp_exchange(call, put, hedge_quote),
+                        underlying_id=underlying_id,
+                        expiry_time_ms=expiry_time_ms,
+                        strike=strike,
+                        call=call,
+                        put=put,
+                    )
+                    opportunity = calculate_put_call_parity(
+                        pair,
+                        call_quote,
+                        put_quote,
+                        hedge_quote,
+                        contract_type=call.contract_type,
+                    )
+                    if opportunity is None or not _has_executable_hedge_legs(opportunity):
+                        continue
+                    if _is_cross_exchange(call, put, hedge_quote):
+                        opportunity = _with_risk_tag(opportunity, "cross_exchange_execution")
+                    candidates.append(opportunity)
+        opportunities.extend(_best_pcp_candidates_by_direction(candidates))
+    return opportunities
+
+
+def _is_pcp_option(instrument: Instrument) -> bool:
+    return (
+        instrument.market_type == "option"
+        and instrument.status == "trading"
+        and instrument.underlying_id is not None
+        and instrument.expiry_time_ms is not None
+        and instrument.strike is not None
+        and instrument.option_type in {"call", "put"}
+    )
+
+
+def _pcp_exchange(call: Instrument, put: Instrument, hedge_quote: ExecutableQuote) -> str:
+    return call.exchange if not _is_cross_exchange(call, put, hedge_quote) else "cross_exchange"
+
+
+def _is_cross_exchange(call: Instrument, put: Instrument, hedge_quote: ExecutableQuote) -> bool:
+    return len({call.exchange, put.exchange, hedge_quote.exchange}) > 1
+
+
+def _with_risk_tag(opportunity: object, tag: str) -> object:
+    risk_tags = list(getattr(opportunity, "risk_tags", None) or [])
+    if tag not in risk_tags:
+        risk_tags.append(tag)
+    return replace(opportunity, risk_tags=risk_tags)
+
+
+def _best_pcp_candidates_by_direction(candidates: list[object]) -> list[object]:
+    best_by_direction: dict[str, object] = {}
+    for candidate in candidates:
+        key = str(getattr(candidate, "direction"))
+        current = best_by_direction.get(key)
+        candidate_profit = Decimal(str(getattr(candidate, "gross_profit")))
+        current_profit = Decimal(str(getattr(current, "gross_profit"))) if current is not None else None
+        if current_profit is None or candidate_profit > current_profit:
+            best_by_direction[key] = candidate
+    return list(best_by_direction.values())
+
+
+def _opportunity_id(opportunity: object, opportunity_type: str, strike_label: str) -> str:
+    base = (
+        f"{getattr(opportunity, 'exchange')}:{opportunity_type}:{getattr(opportunity, 'underlying_id')}:"
+        f"{getattr(opportunity, 'expiry_time_ms')}:{strike_label}:{getattr(opportunity, 'direction')}"
+    )
+    if opportunity_type != "put_call_parity" or getattr(opportunity, "exchange", None) != "cross_exchange":
+        return base
+    leg_keys = ":".join(str(getattr(leg, "instrument_key")) for leg in getattr(opportunity, "legs", []))
+    return f"{base}:{leg_keys}"
+
+
+def _pcp_execution_mode(opportunity: object, opportunity_type: str) -> PcpExecutionMode | None:
+    if opportunity_type != "put_call_parity":
+        return None
+    return _raw_pcp_execution_mode(opportunity)  # type: ignore[return-value]
+
+
+def _raw_pcp_execution_mode(opportunity: object) -> str:
+    return "cross_exchange" if getattr(opportunity, "exchange", None) == "cross_exchange" else "same_exchange"
+
+
+def _has_executable_hedge_legs(opportunity: object) -> bool:
+    for leg in getattr(opportunity, "legs", []):
+        parts = str(getattr(leg, "instrument_key", "")).split(":", 2)
+        market_type = parts[1] if len(parts) > 1 else ""
+        if market_type == "spot" and getattr(leg, "side", None) == "sell":
+            return False
+        if market_type == "perpetual" and getattr(leg, "side", None) == "buy":
+            return False
+    return True
+
+
 def _optional_str(value: object | None) -> str | None:
     if value is None:
         return None
@@ -302,3 +443,14 @@ def _merged_risk_tags(*tag_lists: object) -> list[str]:
             if text not in tags:
                 tags.append(text)
     return tags
+
+
+def _expiry_contract_type(expiry: object) -> str:
+    """Extract contract_type from any complete pair in an OptionExpiry."""
+    for strike in getattr(expiry, "strikes", []):
+        pair = getattr(expiry, "pairs_by_strike", {}).get(strike)
+        if pair is not None and getattr(pair, "call", None) is not None:
+            return str(getattr(pair.call, "contract_type", "linear"))
+        if pair is not None and getattr(pair, "put", None) is not None:
+            return str(getattr(pair.put, "contract_type", "linear"))
+    return "linear"

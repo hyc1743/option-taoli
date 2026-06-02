@@ -52,12 +52,12 @@ def test_renders_detail_page_with_logic_metrics_legs_and_risks():
     assert "95100" in html
     assert "Deviation" in html
     assert "Gross profit" in html
-    assert "Net profit" in html
-    assert "37.5" in html
-    assert "Annualized net return" in html
+    assert "Net profit" not in html
+    assert "37.5" not in html
+    assert "Annualized return" in html
     assert "31.00%" in html
     assert "Total fees" in html
-    assert "Total slippage" in html
+    assert "Total slippage" not in html
     assert "Funding impact" in html
     assert "Capital required" in html
     assert "Executable" in html
@@ -67,8 +67,54 @@ def test_renders_detail_page_with_logic_metrics_legs_and_risks():
     assert "buy" in html
     assert "sell" in html
     assert "hedge" in html
+    assert "Action" in html
+    assert "Market" in html
+    assert "Contract" in html
+    assert "Buy" in html
+    assert "Sell" in html
+    assert "option" in html
+    assert "perpetual" in html
+    assert "BTC-C" in html
+    assert "100000" in html
     assert "font-family: \"IBM Plex Mono\", \"JetBrains Mono\", monospace" in html
     assert "background: #0B0C0A" in html
+
+
+def test_renders_box_execution_legs_with_lower_and_upper_strikes():
+    box = SimpleNamespace(
+        name="box-btc-jun",
+        opportunity_type="box_spread",
+        exchange="deribit",
+        underlying_id="btc_usd",
+        expiry_time_ms=1811744000000,
+        lower_strike="90000",
+        upper_strike="100000",
+        direction="long_box",
+        fixed_cashflow="10000",
+        entry_value="9900",
+        gross_profit="100",
+        net_profit="90",
+        capital_required="20000",
+        is_executable=True,
+        explanation="Long box.",
+        legs=[
+            ArbitrageLeg("deribit:option:BTC-27JUN25-90000-C", "buy", "7000", "1", "lower_call"),
+            ArbitrageLeg("deribit:option:BTC-27JUN25-100000-C", "sell", "2500", "1", "upper_call"),
+            ArbitrageLeg("deribit:option:BTC-27JUN25-100000-P", "buy", "5000", "1", "upper_put"),
+            ArbitrageLeg("deribit:option:BTC-27JUN25-90000-P", "sell", "400", "1", "lower_put"),
+        ],
+    )
+
+    html = render_opportunity_detail_html(box)
+
+    assert "lower_call" in html
+    assert "upper_call" in html
+    assert "lower_put" in html
+    assert "upper_put" in html
+    assert "90000" in html
+    assert "100000" in html
+    assert "BTC-27JUN25-90000-C" in html
+    assert "BTC-27JUN25-100000-P" in html
 
 
 def test_renders_wrapped_detail_with_adjustments_and_basis_fields():

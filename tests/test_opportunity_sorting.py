@@ -6,6 +6,7 @@ from option_taoli.opportunity_sorting import OpportunitySort, sort_opportunities
 def candidate(
     name: str,
     *,
+    gross_profit: str = "100",
     net_profit: str,
     annualized_net_return: str | None,
     total_slippage: str = "1",
@@ -15,6 +16,7 @@ def candidate(
 ):
     return SimpleNamespace(
         name=name,
+        gross_profit=gross_profit,
         net_profit=net_profit,
         annualized_net_return=annualized_net_return,
         total_slippage=total_slippage,
@@ -38,21 +40,19 @@ def wrapped_candidate(name: str, *, net_profit: str, annualized_net_return: str)
     )
 
 
-def test_default_sort_prioritizes_executable_profit_return_slippage_depth_and_nearer_expiry():
+def test_default_sort_prioritizes_executable_gross_profit_return_depth_and_nearer_expiry():
     opportunities = [
-        candidate("not-executable-high-profit", net_profit="1000", annualized_net_return="1", is_executable=False),
-        candidate("lower-profit", net_profit="90", annualized_net_return="3"),
-        candidate("higher-return", net_profit="100", annualized_net_return="0.8"),
-        candidate("lower-slippage", net_profit="100", annualized_net_return="0.7", total_slippage="0.5"),
-        candidate("deeper-book", net_profit="100", annualized_net_return="0.7", total_slippage="1", min_depth="20"),
-        candidate("nearer-expiry", net_profit="100", annualized_net_return="0.7", expiry_time_ms=1810880000000),
+        candidate("not-executable-high-profit", gross_profit="1000", net_profit="10", annualized_net_return="1", is_executable=False),
+        candidate("lower-profit", gross_profit="90", net_profit="900", annualized_net_return="3"),
+        candidate("higher-return", gross_profit="100", net_profit="1", annualized_net_return="0.8"),
+        candidate("deeper-book", gross_profit="100", net_profit="1", annualized_net_return="0.7", min_depth="20"),
+        candidate("nearer-expiry", gross_profit="100", net_profit="1", annualized_net_return="0.7", expiry_time_ms=1810880000000),
     ]
 
     sorted_opportunities = sort_opportunities(opportunities)
 
     assert [opportunity.name for opportunity in sorted_opportunities] == [
         "higher-return",
-        "lower-slippage",
         "deeper-book",
         "nearer-expiry",
         "lower-profit",
@@ -69,22 +69,7 @@ def test_custom_sort_orders_wrapped_candidates_by_selected_metric():
 
     sorted_opportunities = sort_opportunities(
         opportunities,
-        OpportunitySort(primary="annualized_net_return", descending=True),
+        OpportunitySort(primary="gross_profit", descending=True),
     )
 
-    assert [opportunity.name for opportunity in sorted_opportunities] == ["best-return", "middle", "best-net"]
-
-
-def test_custom_sort_can_order_lowest_slippage_first_and_keeps_stable_ties():
-    opportunities = [
-        candidate("first-tie", net_profit="50", annualized_net_return=None, total_slippage="2"),
-        candidate("low-slippage", net_profit="30", annualized_net_return=None, total_slippage="1"),
-        candidate("second-tie", net_profit="80", annualized_net_return=None, total_slippage="2"),
-    ]
-
-    sorted_opportunities = sort_opportunities(
-        opportunities,
-        OpportunitySort(primary="total_slippage", descending=False),
-    )
-
-    assert [opportunity.name for opportunity in sorted_opportunities] == ["low-slippage", "first-tie", "second-tie"]
+    assert [opportunity.name for opportunity in sorted_opportunities] == ["best-net", "best-return", "middle"]

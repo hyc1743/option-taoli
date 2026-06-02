@@ -9,12 +9,14 @@ from typing import Iterable
 class OpportunityFilter:
     min_net_profit: str | None = None
     min_annualized_return: str | None = None
+    # Deprecated: slippage is no longer used as an opportunity filter.
     max_slippage: str | None = None
     min_depth: str | None = None
     exchanges: set[str] | None = None
     underlying_ids: set[str] | None = None
     expiry_time_ms_values: set[int] | None = None
     opportunity_types: set[str] | None = None
+    pcp_execution_modes: set[str] | None = None
     require_executable: bool = True
 
 
@@ -31,11 +33,17 @@ def _matches(candidate: object, filters: OpportunityFilter) -> bool:
         return False
     if filters.opportunity_types is not None and _opportunity_type(candidate) not in filters.opportunity_types:
         return False
+    if (
+        filters.pcp_execution_modes is not None
+        and _opportunity_type(candidate) == "put_call_parity"
+        and _value(candidate, "pcp_execution_mode") not in filters.pcp_execution_modes
+    ):
+        return False
 
     if filters.require_executable and _value(candidate, "is_executable") is False:
         return False
 
-    profit = _decimal_metric(candidate, "net_profit", fallback_field="gross_profit")
+    profit = _decimal_metric(candidate, "gross_profit")
     if filters.min_net_profit is not None and profit is not None and profit < _decimal(filters.min_net_profit):
         return False
 
@@ -45,10 +53,6 @@ def _matches(candidate: object, filters: OpportunityFilter) -> bool:
         and annualized_return is not None
         and annualized_return < _decimal(filters.min_annualized_return)
     ):
-        return False
-
-    slippage = _decimal_metric(candidate, "total_slippage")
-    if filters.max_slippage is not None and slippage is not None and slippage > _decimal(filters.max_slippage):
         return False
 
     depth = _decimal_metric(candidate, "min_depth")
