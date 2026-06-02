@@ -613,11 +613,12 @@ def _ensure_dashboard_bundle(runner=subprocess.run) -> None:
             return
         raise RuntimeError("npm is required to build the dashboard frontend bundle")
     print(f"  → using npm: {npm_cmd[0]}")
+    npm_env = _npm_env(npm_cmd)
     if not (ROOT_DIR / "node_modules").exists():
         print("  → installing dashboard frontend dependencies")
-        runner([*npm_cmd, "install"], cwd=ROOT_DIR, check=True)
+        runner([*npm_cmd, "install"], cwd=ROOT_DIR, check=True, env=npm_env)
     print("  → building obfuscated dashboard frontend")
-    runner([*npm_cmd, "run", "build:dashboard"], cwd=ROOT_DIR, check=True)
+    runner([*npm_cmd, "run", "build:dashboard"], cwd=ROOT_DIR, check=True, env=npm_env)
 
 
 def _npm_command() -> list[str] | None:
@@ -636,6 +637,14 @@ def _npm_command() -> list[str] | None:
     if login_shell_npm:
         return [login_shell_npm]
     return None
+
+
+def _npm_env(npm_cmd: list[str]) -> dict[str, str]:
+    env = os.environ.copy()
+    npm_path = Path(npm_cmd[0])
+    if npm_path.is_absolute():
+        env["PATH"] = f"{npm_path.parent}{os.pathsep}{env.get('PATH', '')}"
+    return env
 
 
 def _find_npm_in_server_paths() -> str | None:

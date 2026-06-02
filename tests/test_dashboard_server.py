@@ -97,7 +97,7 @@ def test_ensure_dashboard_bundle_installs_dependencies_before_build(tmp_path, mo
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: "/usr/bin/npm")
     monkeypatch.delenv("NPM_BIN", raising=False)
 
-    def fake_runner(cmd, cwd, check):
+    def fake_runner(cmd, cwd, check, env=None):
         calls.append((cmd, cwd, check))
 
     dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
@@ -115,7 +115,7 @@ def test_ensure_dashboard_bundle_uses_npm_bin_env_when_npm_is_not_on_path(tmp_pa
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: "/bin/bash" if name == "bash" else None)
     monkeypatch.setenv("NPM_BIN", "/opt/node/bin/npm")
 
-    def fake_runner(cmd, cwd, check):
+    def fake_runner(cmd, cwd, check, env=None):
         calls.append((cmd, cwd, check))
 
     dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
@@ -137,7 +137,7 @@ def test_ensure_dashboard_bundle_finds_npm_in_common_server_path(tmp_path, monke
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: "/bin/bash" if name == "bash" else None)
     monkeypatch.delenv("NPM_BIN", raising=False)
 
-    def fake_runner(cmd, cwd, check):
+    def fake_runner(cmd, cwd, check, env=None):
         calls.append((cmd, cwd, check))
 
     dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
@@ -160,7 +160,7 @@ def test_ensure_dashboard_bundle_finds_npm_in_versioned_server_path(tmp_path, mo
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
     monkeypatch.delenv("NPM_BIN", raising=False)
 
-    def fake_runner(cmd, cwd, check):
+    def fake_runner(cmd, cwd, check, env=None):
         calls.append((cmd, cwd, check))
 
     dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
@@ -169,6 +169,27 @@ def test_ensure_dashboard_bundle_finds_npm_in_versioned_server_path(tmp_path, mo
         ([str(npm), "install"], tmp_path, True),
         ([str(npm), "run", "build:dashboard"], tmp_path, True),
     ]
+
+
+def test_ensure_dashboard_bundle_adds_npm_bin_dir_to_path(tmp_path, monkeypatch):
+    npm = tmp_path / "nodejs" / "v22.20.0" / "bin" / "npm"
+    npm.parent.mkdir(parents=True)
+    npm.write_text("#!/bin/sh\n")
+    calls = []
+    monkeypatch.setattr(dashboard_server, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(dashboard_server, "COMMON_NPM_PATHS", [npm])
+    monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.delenv("NPM_BIN", raising=False)
+
+    def fake_runner(cmd, cwd, check, env=None):
+        calls.append((cmd, cwd, check, env))
+
+    dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
+
+    assert calls[0][3]["PATH"].startswith(f"{npm.parent}:/usr/bin")
+    assert calls[1][3]["PATH"].startswith(f"{npm.parent}:/usr/bin")
 
 
 def test_npm_command_finds_npm_from_login_shell(monkeypatch):
