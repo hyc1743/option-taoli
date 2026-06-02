@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from html import escape
 import re
@@ -634,4 +634,4 @@ def _date_label(value: object | None) -> str | None:
 
 
 def _datetime_label(value_ms: int) -> str:
-    return datetime.fromtimestamp(value_ms / 1000, tz=UTC).isoformat(timespec="seconds")
+    return datetime.fromtimestamp(value_ms / 1000, tz=timezone.utc).isoformat(timespec="seconds")
