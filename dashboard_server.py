@@ -45,6 +45,13 @@ CLIENT_BUILD_INPUTS = [
     ROOT_DIR / "package.json",
     ROOT_DIR / "package-lock.json",
 ]
+COMMON_NPM_PATHS = [
+    Path("/www/server/nodejs/bin/npm"),
+    Path("/usr/local/bin/npm"),
+    Path("/usr/bin/npm"),
+    Path("/opt/node/bin/npm"),
+    Path("/opt/nodejs/bin/npm"),
+]
 
 # ─── Global state ───────────────────────────────────────────
 
@@ -609,9 +616,32 @@ def _npm_command() -> list[str] | None:
     npm_bin = os.environ.get("NPM_BIN")
     if npm_bin:
         return [npm_bin]
-    if shutil.which("npm") is None:
+    if shutil.which("npm") is not None:
+        return ["npm"]
+    for path in COMMON_NPM_PATHS:
+        if path.exists():
+            return [str(path)]
+    login_shell_npm = _npm_from_login_shell()
+    if login_shell_npm:
+        return [login_shell_npm]
+    return None
+
+
+def _npm_from_login_shell() -> str | None:
+    if shutil.which("bash") is None:
         return None
-    return ["npm"]
+    try:
+        result = subprocess.run(
+            ["bash", "-lc", "command -v npm"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    npm = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    return npm or None
 
 
 
