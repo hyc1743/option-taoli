@@ -95,6 +95,7 @@ def test_ensure_dashboard_bundle_installs_dependencies_before_build(tmp_path, mo
     monkeypatch.setattr(dashboard_server, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: "/usr/bin/npm")
+    monkeypatch.delenv("NPM_BIN", raising=False)
 
     def fake_runner(cmd, cwd, check):
         calls.append((cmd, cwd, check))
@@ -107,6 +108,24 @@ def test_ensure_dashboard_bundle_installs_dependencies_before_build(tmp_path, mo
     ]
 
 
+def test_ensure_dashboard_bundle_uses_npm_bin_env_when_npm_is_not_on_path(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(dashboard_server, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+    monkeypatch.setenv("NPM_BIN", "/opt/node/bin/npm")
+
+    def fake_runner(cmd, cwd, check):
+        calls.append((cmd, cwd, check))
+
+    dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
+
+    assert calls == [
+        (["/opt/node/bin/npm", "install"], tmp_path, True),
+        (["/opt/node/bin/npm", "run", "build:dashboard"], tmp_path, True),
+    ]
+
+
 def test_ensure_dashboard_bundle_uses_existing_bundle_when_npm_is_missing(tmp_path, monkeypatch, capsys):
     bundle = tmp_path / "public" / "dashboard.bundle.js"
     bundle.parent.mkdir()
@@ -114,12 +133,13 @@ def test_ensure_dashboard_bundle_uses_existing_bundle_when_npm_is_missing(tmp_pa
     monkeypatch.setattr(dashboard_server, "CLIENT_BUNDLE", bundle)
     monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+    monkeypatch.delenv("NPM_BIN", raising=False)
 
     calls = []
     dashboard_server._ensure_dashboard_bundle(runner=lambda *args, **kwargs: calls.append((args, kwargs)))
 
     assert calls == []
-    assert "npm not found" in capsys.readouterr().out
+    assert "npm not found in PATH" in capsys.readouterr().out
 
 
 def test_ensure_dashboard_bundle_skips_when_current(monkeypatch):
