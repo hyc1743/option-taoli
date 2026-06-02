@@ -52,6 +52,13 @@ COMMON_NPM_PATHS = [
     Path("/opt/node/bin/npm"),
     Path("/opt/nodejs/bin/npm"),
 ]
+NPM_SEARCH_ROOTS = [
+    Path("/www/server/nodejs"),
+    Path("/www/server"),
+    Path("/usr/local"),
+    Path("/opt"),
+    Path.home() / ".nvm" / "versions" / "node",
+]
 
 # ─── Global state ───────────────────────────────────────────
 
@@ -605,6 +612,7 @@ def _ensure_dashboard_bundle(runner=subprocess.run) -> None:
             print("  → npm not found in PATH; using existing dashboard frontend bundle")
             return
         raise RuntimeError("npm is required to build the dashboard frontend bundle")
+    print(f"  → using npm: {npm_cmd[0]}")
     if not (ROOT_DIR / "node_modules").exists():
         print("  → installing dashboard frontend dependencies")
         runner([*npm_cmd, "install"], cwd=ROOT_DIR, check=True)
@@ -621,18 +629,37 @@ def _npm_command() -> list[str] | None:
     for path in COMMON_NPM_PATHS:
         if path.exists():
             return [str(path)]
+    discovered_npm = _find_npm_in_server_paths()
+    if discovered_npm:
+        return [discovered_npm]
     login_shell_npm = _npm_from_login_shell()
     if login_shell_npm:
         return [login_shell_npm]
     return None
 
 
+def _find_npm_in_server_paths() -> str | None:
+    matches: list[Path] = []
+    for root in NPM_SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        try:
+            matches.extend(root.glob("**/bin/npm"))
+        except Exception:
+            continue
+    if not matches:
+        return None
+    matches.sort(key=lambda path: len(path.parts))
+    return str(matches[0])
+
+
 def _npm_from_login_shell() -> str | None:
-    if shutil.which("bash") is None:
+    bash = shutil.which("bash") or ("/bin/bash" if Path("/bin/bash").exists() else None)
+    if bash is None:
         return None
     try:
         result = subprocess.run(
-            ["bash", "-lc", "command -v npm"],
+            [bash, "-lc", "command -v npm"],
             capture_output=True,
             text=True,
             check=False,

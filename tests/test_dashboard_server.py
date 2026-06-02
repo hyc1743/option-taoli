@@ -148,6 +148,29 @@ def test_ensure_dashboard_bundle_finds_npm_in_common_server_path(tmp_path, monke
     ]
 
 
+def test_ensure_dashboard_bundle_finds_npm_in_versioned_server_path(tmp_path, monkeypatch):
+    npm = tmp_path / "server" / "nodejs" / "v22.16.0" / "bin" / "npm"
+    npm.parent.mkdir(parents=True)
+    npm.write_text("#!/bin/sh\n")
+    calls = []
+    monkeypatch.setattr(dashboard_server, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(dashboard_server, "COMMON_NPM_PATHS", [])
+    monkeypatch.setattr(dashboard_server, "NPM_SEARCH_ROOTS", [tmp_path / "server" / "nodejs"])
+    monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+    monkeypatch.delenv("NPM_BIN", raising=False)
+
+    def fake_runner(cmd, cwd, check):
+        calls.append((cmd, cwd, check))
+
+    dashboard_server._ensure_dashboard_bundle(runner=fake_runner)
+
+    assert calls == [
+        ([str(npm), "install"], tmp_path, True),
+        ([str(npm), "run", "build:dashboard"], tmp_path, True),
+    ]
+
+
 def test_npm_command_finds_npm_from_login_shell(monkeypatch):
     class Result:
         stdout = "/root/.nvm/versions/node/v22.0.0/bin/npm\n"
@@ -160,13 +183,29 @@ def test_npm_command_finds_npm_from_login_shell(monkeypatch):
     assert dashboard_server._npm_command() == ["/root/.nvm/versions/node/v22.0.0/bin/npm"]
 
 
+def test_npm_command_uses_bin_bash_when_bash_is_not_on_path(monkeypatch):
+    class Result:
+        stdout = "/usr/local/node/bin/npm\n"
+
+    monkeypatch.setattr(dashboard_server.Path, "exists", lambda self: str(self) == "/bin/bash")
+    monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
+    monkeypatch.setattr(dashboard_server, "COMMON_NPM_PATHS", [])
+    monkeypatch.setattr(dashboard_server, "NPM_SEARCH_ROOTS", [])
+    monkeypatch.setattr(dashboard_server.subprocess, "run", lambda *args, **kwargs: Result())
+    monkeypatch.delenv("NPM_BIN", raising=False)
+
+    assert dashboard_server._npm_command() == ["/usr/local/node/bin/npm"]
+
+
 def test_ensure_dashboard_bundle_uses_existing_bundle_when_npm_is_missing(tmp_path, monkeypatch, capsys):
     bundle = tmp_path / "public" / "dashboard.bundle.js"
     bundle.parent.mkdir()
     bundle.write_text("bundle")
     monkeypatch.setattr(dashboard_server, "CLIENT_BUNDLE", bundle)
     monkeypatch.setattr(dashboard_server, "COMMON_NPM_PATHS", [])
+    monkeypatch.setattr(dashboard_server, "NPM_SEARCH_ROOTS", [])
     monkeypatch.setattr(dashboard_server, "_dashboard_bundle_stale", lambda: True)
+    monkeypatch.setattr(dashboard_server, "_npm_from_login_shell", lambda: None)
     monkeypatch.setattr(dashboard_server.shutil, "which", lambda name: None)
     monkeypatch.delenv("NPM_BIN", raising=False)
 
