@@ -3,6 +3,8 @@ import re
 import time
 from pathlib import Path
 
+from option_taoli.execution_diagnostics import ExecutionDiagnostic
+
 
 CLIENT_SOURCE = Path("src/dashboard_client.js").read_text(encoding="utf-8")
 
@@ -51,6 +53,34 @@ def test_cache_response_reports_scan_in_progress():
         dashboard_server._scan_result = previous_result
         dashboard_server._scanning = previous_scanning
         dashboard_server._scan_progress = previous_progress
+
+
+def test_execution_diagnostic_serializes_for_scan_api():
+    diagnostic = ExecutionDiagnostic(
+        status="ready",
+        strategy_type="sell_future_buy_synthetic",
+        anchor_leg="call",
+        all_taker_net_profit="95",
+        maker_anchor_net_profit="120",
+        estimated_open_fees="5",
+        estimated_settlement_cost="1",
+        estimated_funding_impact="-2",
+        dte_hours="24",
+        moneyness="0.01",
+        depth_ok=True,
+        quote_fresh=True,
+        reject_reasons=[],
+        risk_tags=["cross_exchange_execution"],
+    )
+
+    data = dashboard_server._execution_json(diagnostic)
+
+    assert data["status"] == "ready"
+    assert data["strategy_type"] == "sell_future_buy_synthetic"
+    assert data["anchor_leg"] == "call"
+    assert data["all_taker_net_profit"] == "95"
+    assert data["maker_anchor_net_profit"] == "120"
+    assert data["reject_reasons"] == []
 
 
 def test_dashboard_bundle_stale_when_missing_or_source_is_newer(tmp_path, monkeypatch):

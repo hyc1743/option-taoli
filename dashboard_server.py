@@ -24,6 +24,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from option_taoli.monitor import ArbitrageMonitor, MarketDataBatch, MonitorConfig
+from option_taoli.execution_diagnostics import ExecutionDiagnosticConfig
 from option_taoli.opportunity_history import OpportunityHistoryStore
 
 # Import multi-exchange fetchers from scan_multi
@@ -137,7 +138,11 @@ def _result_from_snapshots(
 
     store = None if partial else OpportunityHistoryStore("data/opportunities.sqlite3")
     monitor = ArbitrageMonitor(
-        MonitorConfig(fee_rate=FEE_RATE, capital_requirement_rate=CAPITAL_RATE),
+        MonitorConfig(
+            fee_rate=FEE_RATE,
+            capital_requirement_rate=CAPITAL_RATE,
+            execution_diagnostic_config=ExecutionDiagnosticConfig(),
+        ),
         history_store=store,
     )
     result = monitor.scan_once(batch, observed_at_ms=now_ms)
@@ -159,6 +164,7 @@ def _result_from_snapshots(
             "capital": o.capital_required,
             "executable": o.is_executable,
             "pcp_execution_mode": o.pcp_execution_mode,
+            "execution": _execution_json(o.execution_diagnostic),
             "risk_tags": o.risk_tags or [],
         }
         try:
@@ -190,6 +196,27 @@ def _result_from_snapshots(
         "stats": {"by_type": by_type, "by_exchange": by_exchange, "executable": exec_count},
         "exchanges": exch_info,
         "error": None, "scanning": partial, "partial": partial,
+    }
+
+
+def _execution_json(diagnostic: Any) -> dict[str, Any] | None:
+    if diagnostic is None:
+        return None
+    return {
+        "status": diagnostic.status,
+        "strategy_type": diagnostic.strategy_type,
+        "anchor_leg": diagnostic.anchor_leg,
+        "all_taker_net_profit": diagnostic.all_taker_net_profit,
+        "maker_anchor_net_profit": diagnostic.maker_anchor_net_profit,
+        "estimated_open_fees": diagnostic.estimated_open_fees,
+        "estimated_settlement_cost": diagnostic.estimated_settlement_cost,
+        "estimated_funding_impact": diagnostic.estimated_funding_impact,
+        "dte_hours": diagnostic.dte_hours,
+        "moneyness": diagnostic.moneyness,
+        "depth_ok": diagnostic.depth_ok,
+        "quote_fresh": diagnostic.quote_fresh,
+        "reject_reasons": list(diagnostic.reject_reasons or []),
+        "risk_tags": list(diagnostic.risk_tags or []),
     }
 
 
