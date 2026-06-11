@@ -221,8 +221,13 @@ function ensureTable() {
         '<th data-col="expiry_ms" style="width:90px"><button type="button" class="sort-btn">行权日<span class="ar"></span></button></th>' +
         '<th data-col="strike_display" style="width:90px"><button type="button" class="sort-btn">行权价<span class="ar"></span></button></th>' +
         '<th data-col="gross_profit" style="width:90px"><button type="button" class="sort-btn">收益<span class="ar"></span></button></th>' +
+        '<th data-col="execution_status" style="width:70px"><button type="button" class="sort-btn">Exec<span class="ar"></span></button></th>' +
+        '<th data-col="maker_anchor_net_profit" style="width:92px"><button type="button" class="sort-btn">Maker Net<span class="ar"></span></button></th>' +
+        '<th data-col="all_taker_net_profit" style="width:90px"><button type="button" class="sort-btn">Taker Net<span class="ar"></span></button></th>' +
+        '<th style="width:64px">Anchor<span class="ar"></span></th>' +
         '<th data-col="annualized_return" class="sorted" aria-sort="descending" style="width:80px"><button type="button" class="sort-btn">年化<span class="ar">desc</span></button></th>' +
         '<th data-col="capital" style="width:80px"><button type="button" class="sort-btn">占用<span class="ar"></span></button></th>' +
+        '<th style="width:160px">Reason<span class="ar"></span></th>' +
         '<th style="width:auto">风险<span class="ar"></span></th>' +
         '</tr></thead><tbody id="opp-tbody"></tbody></table>';
     bindSortHeaders();
@@ -329,6 +334,12 @@ function sortOppData(col, asc) {
 
 function sortValue(o, col) {
     if (col === 'strike_display') return displayStrike(o);
+    if (col === 'execution_status') return executionStatus(o);
+    if (col === 'maker_anchor_net_profit' || col === 'all_taker_net_profit') {
+        var ev = executionValue(o, col);
+        var en = parseFloat(ev);
+        return isNaN(en) ? null : en;
+    }
     if (col === 'gross_profit' || col === 'annualized_return' || col === 'capital' || col === 'expiry_ms') {
         var n = parseFloat(o[col]);
         return isNaN(n) ? null : n;
@@ -369,14 +380,21 @@ function renderRow(o) {
     var pcpMode = esc(o.pcp_execution_mode || '');
     var label = esc(labels[o.type] || o.type || '');
     var typeClass = esc(css[o.type] || '');
+    var execStatus = executionStatus(o);
+    var execClass = execStatus === 'Ready' ? 'up' : (execStatus === 'Blocked' ? 'dn' : 'rt');
     return '<tr class="data-row '+(o.executable?'exec':'noexec')+'" data-type="'+type+'" data-pcp-mode="'+pcpMode+'" data-exchange="'+esc(o.exchange || '')+'" data-id="'+id+'">'+
         '<td class="n">'+esc(o.exchange || '')+'</td>'+
         '<td class="ty '+typeClass+'"><button type="button" class="link-button detail-toggle" aria-expanded="'+(openDetailIds.has(id)?'true':'false')+'" aria-controls="detail-'+id+'" onclick="toggleDetail(&quot;'+id+'&quot;, this)">'+label+'</button></td>'+
         '<td class="n">'+tsToDate(o.expiry_ms)+'</td>'+
         '<td class="n">'+esc(s)+'</td>'+
         '<td class="n up">'+esc(fmtUSD(o.gross_profit))+'</td>'+
+        '<td class="n '+execClass+'">'+esc(execStatus)+'</td>'+
+        '<td class="n">'+esc(fmtUSD(executionValue(o, 'maker_anchor_net_profit')))+'</td>'+
+        '<td class="n">'+esc(fmtUSD(executionValue(o, 'all_taker_net_profit')))+'</td>'+
+        '<td>'+esc(executionValue(o, 'anchor_leg') || '')+'</td>'+
         '<td class="n rt">'+esc(fmtAPY(o.annualized_return))+'</td>'+
         '<td class="n ca">'+esc(fmtUSD(o.capital))+'</td>'+
+        '<td>'+esc(executionReasons(o))+'</td>'+
         '<td><div class="rt">'+rt+'</div></td>'+
         '</tr>';
 }
@@ -384,17 +402,38 @@ function renderRow(o) {
 function renderDetail(o) {
     var legs = renderLegTable(o);
     var id = domId(o.id || '');
-    return '<tr class="detail" id="detail-'+id+'"><td colspan="8">'+
+    return '<tr class="detail" id="detail-'+id+'"><td colspan="13">'+
         '<div class="dg">'+
         '<div><dt>交易所</dt><dd>'+o.exchange+'</dd></div>'+
         '<div><dt>标的</dt><dd>'+o.underlying+'</dd></div>'+
         '<div><dt>到期日</dt><dd>'+tsToDate(o.expiry_ms)+'</dd></div>'+
         '<div><dt>可执行</dt><dd style="color:var(--green)">'+(o.executable?'是':'否')+'</dd></div>'+
+        '<div><dt>Exec</dt><dd>'+esc(executionStatus(o))+'</dd></div>'+
+        '<div><dt>Maker Net</dt><dd>'+esc(fmtUSD(executionValue(o, 'maker_anchor_net_profit')))+'</dd></div>'+
+        '<div><dt>Taker Net</dt><dd>'+esc(fmtUSD(executionValue(o, 'all_taker_net_profit')))+'</dd></div>'+
+        '<div><dt>Reason</dt><dd>'+esc(executionReasons(o))+'</dd></div>'+
         '</div>'+
         '<div class="sim-head"><button class="sim-btn" onclick="simulatePayoff(&quot;'+id+'&quot;)">一键模拟</button><span class="payoff-note">到期价格 / 盈亏金额</span></div>'+
         '<div class="payoff-chart" id="payoff-chart-'+id+'"></div>'+
         legs+
         '</td></tr>';
+}
+
+function executionStatus(o) {
+    var status = executionValue(o, 'status');
+    if (!status) return '';
+    status = String(status).replace(/_/g, ' ');
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+}
+
+function executionValue(o, key) {
+    return o && o.execution ? o.execution[key] : null;
+}
+
+function executionReasons(o) {
+    var reasons = executionValue(o, 'reject_reasons') || [];
+    if (!Array.isArray(reasons)) return String(reasons || '');
+    return reasons.slice(0, 3).join(', ');
 }
 
 function renderLegTable(o) {

@@ -27,7 +27,7 @@ def render_opportunity_list_html(
     if not rows:
         rows = """
           <tr>
-            <td colspan="12" class="empty">No opportunities match the current filters.</td>
+            <td colspan="19" class="empty">No opportunities match the current filters.</td>
           </tr>"""
 
     return f"""<!doctype html>
@@ -131,6 +131,13 @@ def render_opportunity_list_html(
               <th>Expiry</th>
               <th>Strike</th>
               <th class="num">Profit</th>
+              <th>Exec</th>
+              <th>Anchor</th>
+              <th class="num">Maker Net</th>
+              <th class="num">Taker Net</th>
+              <th class="num">DTE</th>
+              <th class="num">Funding</th>
+              <th>Reason</th>
               <th class="num">Annualized</th>
               <th class="num">Depth</th>
               <th class="num">Capital</th>
@@ -266,6 +273,10 @@ def render_opportunity_detail_html(
               ("Funding impact", _value(candidate, "funding_impact")),
               ("Capital required", _value(candidate, "capital_required")),
           ])}
+        </section>
+        <section class="section">
+          <h2>Execution diagnostic</h2>
+          {_render_key_values(_execution_rows(candidate))}
         </section>
         <section class="section">
           <h2>Price relationship</h2>
@@ -506,6 +517,8 @@ def _string_or_none(value: object | None) -> str | None:
 def _render_row(candidate: object) -> str:
     status = "Executable" if _value(candidate, "is_executable") is not False else "Blocked"
     status_class = "ok" if status == "Executable" else "blocked"
+    execution_status = _execution_status(candidate)
+    execution_class = "ok" if execution_status == "Ready" else "blocked" if execution_status == "Blocked" else ""
     tags = _risk_tags(candidate)
     tag_html = " ".join(f'<span class="tag">{escape(tag)}</span>' for tag in tags) if tags else ""
     cells = [
@@ -516,6 +529,12 @@ def _render_row(candidate: object) -> str:
         _text(_date_label(_value(candidate, "expiry_time_ms"))),
         _text(_format_strike(_value(candidate, "strike")), fallback=_strike_range(candidate)),
         _text(_value(candidate, "gross_profit")),
+        _text(_diagnostic_value(candidate, "anchor_leg")),
+        _text(_diagnostic_value(candidate, "maker_anchor_net_profit")),
+        _text(_diagnostic_value(candidate, "all_taker_net_profit")),
+        _text(_diagnostic_value(candidate, "dte_hours")),
+        _text(_diagnostic_value(candidate, "estimated_funding_impact")),
+        _text(", ".join(_execution_reasons(candidate))),
         _text(_percent(_metric(candidate, "annualized_net_return", fallback_field="annualized_return"))),
         _text(_value(candidate, "min_depth")),
         _text(_value(candidate, "capital_required")),
@@ -528,12 +547,61 @@ def _render_row(candidate: object) -> str:
               <td>{cells[4]}</td>
               <td>{cells[5]}</td>
               <td class="num">{cells[6]}</td>
-              <td class="num">{cells[7]}</td>
+              <td class="{execution_class}">{escape(execution_status)}</td>
+              <td>{cells[7]}</td>
               <td class="num">{cells[8]}</td>
               <td class="num">{cells[9]}</td>
+              <td class="num">{cells[10]}</td>
+              <td class="num">{cells[11]}</td>
+              <td>{cells[12]}</td>
+              <td class="num">{cells[13]}</td>
+              <td class="num">{cells[14]}</td>
+              <td class="num">{cells[15]}</td>
               <td class="{status_class}">{escape(status)}</td>
               <td>{tag_html}</td>
             </tr>"""
+
+
+def _execution_rows(candidate: object) -> list[tuple[str, object | None]]:
+    return [
+        ("Status", _execution_status(candidate)),
+        ("Strategy type", _diagnostic_value(candidate, "strategy_type")),
+        ("Anchor leg", _diagnostic_value(candidate, "anchor_leg")),
+        ("Maker anchor net profit", _diagnostic_value(candidate, "maker_anchor_net_profit")),
+        ("All taker net profit", _diagnostic_value(candidate, "all_taker_net_profit")),
+        ("Estimated open fees", _diagnostic_value(candidate, "estimated_open_fees")),
+        ("Estimated settlement cost", _diagnostic_value(candidate, "estimated_settlement_cost")),
+        ("Estimated funding impact", _diagnostic_value(candidate, "estimated_funding_impact")),
+        ("DTE hours", _diagnostic_value(candidate, "dte_hours")),
+        ("Moneyness", _diagnostic_value(candidate, "moneyness")),
+        ("Depth OK", _diagnostic_value(candidate, "depth_ok")),
+        ("Quote fresh", _diagnostic_value(candidate, "quote_fresh")),
+        ("Reasons", ", ".join(_execution_reasons(candidate)) or None),
+    ]
+
+
+def _execution_status(candidate: object) -> str:
+    value = _diagnostic_value(candidate, "status")
+    if value is None:
+        return ""
+    return str(value).replace("_", " ").title()
+
+
+def _execution_reasons(candidate: object) -> list[str]:
+    diagnostic = _value(candidate, "execution_diagnostic")
+    if diagnostic is None:
+        return []
+    value = getattr(diagnostic, "reject_reasons", None)
+    if not value:
+        return []
+    return [str(reason) for reason in value]
+
+
+def _diagnostic_value(candidate: object, field_name: str) -> object | None:
+    diagnostic = _value(candidate, "execution_diagnostic")
+    if diagnostic is None or not hasattr(diagnostic, field_name):
+        return None
+    return getattr(diagnostic, field_name)
 
 
 def _value(candidate: object, field_name: str) -> object | None:

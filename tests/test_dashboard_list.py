@@ -22,6 +22,7 @@ def candidate(
     capital_required: str = "25000",
     is_executable: bool = True,
     risk_tags: list[str] | None = None,
+    execution_diagnostic=None,
 ):
     return SimpleNamespace(
         name=name,
@@ -39,6 +40,7 @@ def candidate(
         capital_required=capital_required,
         is_executable=is_executable,
         risk_tags=risk_tags or [],
+        execution_diagnostic=execution_diagnostic,
     )
 
 
@@ -177,3 +179,36 @@ def test_dashboard_formats_integral_strikes_without_decimal_suffix():
 
     assert ">100000<" in html
     assert "100000.000" not in html
+
+
+def test_dashboard_list_renders_execution_diagnostics():
+    diagnostic = SimpleNamespace(
+        status="ready",
+        anchor_leg="call",
+        all_taker_net_profit="95",
+        maker_anchor_net_profit="120",
+        estimated_funding_impact="-2",
+        dte_hours="24",
+        reject_reasons=[],
+    )
+
+    html = render_opportunity_list_html(
+        [
+            candidate(
+                "pcp",
+                opportunity_type="put_call_parity",
+                exchange="deribit",
+                underlying_id="btc_usd",
+                expiry_time_ms=1811744000000,
+                execution_diagnostic=diagnostic,
+            )
+        ]
+    )
+
+    assert "Exec" in html
+    assert "Maker Net" in html
+    assert "Taker Net" in html
+    assert "Ready" in html
+    assert "call" in html
+    assert "120" in html
+    assert "95" in html

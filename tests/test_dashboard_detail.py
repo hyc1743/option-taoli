@@ -25,6 +25,21 @@ def opportunity_detail():
         capital_required="12000",
         is_executable=True,
         risk_tags=["funding_cost_assumed", "legs_3"],
+        execution_diagnostic=SimpleNamespace(
+            status="watch",
+            strategy_type="sell_future_buy_synthetic",
+            anchor_leg="put",
+            all_taker_net_profit="18",
+            maker_anchor_net_profit="24",
+            estimated_open_fees="5",
+            estimated_settlement_cost="1",
+            estimated_funding_impact="2",
+            dte_hours="24",
+            moneyness="0.01",
+            depth_ok=True,
+            quote_fresh=True,
+            reject_reasons=["min_execution_net_profit_not_met"],
+        ),
         explanation="C - P + K is below hedge bid; buy call, sell put, and sell hedge.",
         legs=[
             ArbitrageLeg("deribit:option:BTC-C", "buy", "5000", "1", "call"),
@@ -60,6 +75,9 @@ def test_renders_detail_page_with_logic_metrics_legs_and_risks():
     assert "Total slippage" not in html
     assert "Funding impact" in html
     assert "Capital required" in html
+    assert "Execution diagnostic" in html
+    assert "Maker anchor net profit" in html
+    assert "min_execution_net_profit_not_met" in html
     assert "Executable" in html
     assert "funding_cost_assumed" in html
     assert "legs_3" in html

@@ -355,6 +355,9 @@ def test_main_table_shows_expiry_hides_direction_and_refreshes_filter_counts():
     assert "function displayStrike(o)" in CLIENT_SOURCE
     assert "function fmtStrike(v)" in CLIENT_SOURCE
     assert "var s = displayStrike(o);" in CLIENT_SOURCE
+    assert "executionStatus(o)" in CLIENT_SOURCE
+    assert "Maker Net" in CLIENT_SOURCE
+    assert "Taker Net" in CLIENT_SOURCE
 
     apply_scan_body = re.search(r"function applyScanData\(d\) \{(.*?)\n\}", CLIENT_SOURCE, re.S)
     assert apply_scan_body is not None
