@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from option_taoli.adapters.deribit import DeribitAdapter
 from option_taoli.alert_rules import AlertRule
+from option_taoli.execution_diagnostics import ExecutionDiagnosticConfig
 from option_taoli.market_depth import standardize_quote
 from option_taoli.monitor import ArbitrageMonitor, MarketDataBatch, MonitorConfig
 from option_taoli.opportunity_history import OpportunityHistoryStore
@@ -202,7 +203,7 @@ def test_scan_once_does_not_generate_short_spot_hedge_legs():
     ]
 
 
-def test_scan_once_does_not_generate_long_perpetual_hedge_legs_when_spot_buy_is_available():
+def test_scan_once_can_generate_long_perpetual_hedge_legs_when_spot_buy_is_available():
     batch = deribit_pcp_batch()
     spot_hedge = next(iter(batch.hedge_quotes_by_underlying.values()))
     perpetual_hedge = replace(
@@ -230,14 +231,58 @@ def test_scan_once_does_not_generate_long_perpetual_hedge_legs_when_spot_buy_is_
         leg
         for opportunity in result.opportunities
         for leg in opportunity.legs
-        if leg.instrument_key == spot_hedge.instrument_key and leg.side == "buy"
+        if leg.instrument_key == perpetual_hedge.instrument_key and leg.side == "buy"
     ]
     assert not [
         leg
         for opportunity in result.opportunities
         for leg in opportunity.legs
+        if leg.instrument_key == spot_hedge.instrument_key and leg.side == "sell"
+    ]
+
+
+def test_cross_exchange_pcp_keeps_perpetual_buy_hedge_direction():
+    batch = deribit_pcp_batch()
+    spot_hedge = next(iter(batch.hedge_quotes_by_underlying.values()))
+    perpetual_hedge = replace(
+        spot_hedge,
+        instrument_key="binance:perpetual:BTCUSDT",
+        exchange="binance",
+        market_type="perpetual",
+        instrument_id="BTCUSDT",
+        best_bid_price="100890",
+        best_ask_price="100900",
+    )
+    perpetual_batch = MarketDataBatch(
+        instruments=batch.instruments,
+        quotes_by_instrument_key=batch.quotes_by_instrument_key | {
+            perpetual_hedge.instrument_key: perpetual_hedge
+        },
+        hedge_quotes_by_underlying={("binance:perpetual", "btc_usd"): perpetual_hedge},
+    )
+
+    result = ArbitrageMonitor(MonitorConfig()).scan_once(perpetual_batch, observed_at_ms=1810880000000)
+
+    assert [
+        leg
+        for opportunity in result.opportunities
+        for leg in opportunity.legs
         if leg.instrument_key == perpetual_hedge.instrument_key and leg.side == "buy"
     ]
+
+
+def test_monitor_attaches_execution_diagnostic():
+    monitor = ArbitrageMonitor(
+        MonitorConfig(
+            fee_rate="0",
+            execution_diagnostic_config=ExecutionDiagnosticConfig(min_execution_net_profit="20"),
+        )
+    )
+
+    result = monitor.scan_once(deribit_pcp_batch(), observed_at_ms=1810880000000)
+
+    assert result.opportunities[0].execution_diagnostic is not None
+    assert result.opportunities[0].execution_diagnostic.status in {"ready", "watch", "blocked"}
 
 
 def test_scan_once_detects_put_call_parity_across_exchanges():

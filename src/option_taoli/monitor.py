@@ -8,6 +8,11 @@ from typing import Callable, Iterable, Literal, Protocol
 from option_taoli.alert_rules import AlertRule, select_alert_candidates
 from option_taoli.box_spread import calculate_box_spreads
 from option_taoli.dashboard import render_opportunity_list_html
+from option_taoli.execution_diagnostics import (
+    ExecutionDiagnostic,
+    ExecutionDiagnosticConfig,
+    diagnose_execution,
+)
 from option_taoli.implied_futures_basis import calculate_implied_futures_basis
 from option_taoli.market_depth import ExecutableQuote
 from option_taoli.models import Instrument
@@ -40,6 +45,7 @@ class MarketDataBatch:
 @dataclass(frozen=True)
 class MonitorConfig:
     fee_rate: str = "0"
+    taker_fee_rates_by_exchange_market: Mapping[str, str] | None = None
     capital_requirement_rate: str = "1"
     funding_holding_hours: str | None = None
     funding_interval_hours: str = "8"
@@ -47,6 +53,7 @@ class MonitorConfig:
     opportunity_sort: OpportunitySort | None = None
     alert_rule: AlertRule | None = None
     alert_once_per_opportunity: bool = True
+    execution_diagnostic_config: ExecutionDiagnosticConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,7 @@ class MonitoredOpportunity:
     is_executable: bool
     risk_tags: list[str]
     pcp_execution_mode: PcpExecutionMode | None
+    execution_diagnostic: ExecutionDiagnostic | None
     opportunity: object
     adjustments: AdjustedOpportunity
 
@@ -137,7 +145,7 @@ class ArbitrageMonitor:
     def scan_once(self, batch: MarketDataBatch, *, observed_at_ms: int) -> MonitorScanResult:
         raw_opportunities = self._calculate_opportunities(batch, observed_at_ms=observed_at_ms)
         opportunities = [
-            self._monitor_candidate(opportunity, observed_at_ms=observed_at_ms)
+            self._monitor_candidate(opportunity, batch=batch, observed_at_ms=observed_at_ms)
             for opportunity in raw_opportunities
         ]
 
@@ -234,7 +242,13 @@ class ArbitrageMonitor:
 
         return opportunities
 
-    def _monitor_candidate(self, opportunity: object, *, observed_at_ms: int) -> MonitoredOpportunity:
+    def _monitor_candidate(
+        self,
+        opportunity: object,
+        *,
+        batch: MarketDataBatch,
+        observed_at_ms: int,
+    ) -> MonitoredOpportunity:
         adjustments = apply_opportunity_adjustments(
             opportunity,
             fee_rate=self._config.fee_rate,
@@ -244,6 +258,18 @@ class ArbitrageMonitor:
             now_ms=observed_at_ms,
         )
         opportunity_type = _opportunity_type(opportunity)
+        execution_diagnostic = None
+        if self._config.execution_diagnostic_config is not None:
+            execution_diagnostic = diagnose_execution(
+                opportunity,
+                batch,
+                self._config.execution_diagnostic_config,
+                observed_at_ms=observed_at_ms,
+                fee_rate=self._config.fee_rate,
+                taker_fee_rates_by_exchange_market=self._config.taker_fee_rates_by_exchange_market,
+                funding_holding_hours=self._config.funding_holding_hours,
+                funding_interval_hours=self._config.funding_interval_hours,
+            )
         strike = _optional_str(getattr(opportunity, "strike", None))
         lower_strike = _optional_str(getattr(opportunity, "lower_strike", None))
         upper_strike = _optional_str(getattr(opportunity, "upper_strike", None))
@@ -270,6 +296,7 @@ class ArbitrageMonitor:
             is_executable=adjustments.is_executable,
             risk_tags=_merged_risk_tags(getattr(opportunity, "risk_tags", []), adjustments.risk_tags),
             pcp_execution_mode=_pcp_execution_mode(opportunity, opportunity_type),
+            execution_diagnostic=execution_diagnostic,
             opportunity=opportunity,
             adjustments=adjustments,
         )
@@ -423,8 +450,6 @@ def _has_executable_hedge_legs(opportunity: object) -> bool:
         parts = str(getattr(leg, "instrument_key", "")).split(":", 2)
         market_type = parts[1] if len(parts) > 1 else ""
         if market_type == "spot" and getattr(leg, "side", None) == "sell":
-            return False
-        if market_type == "perpetual" and getattr(leg, "side", None) == "buy":
             return False
     return True
 
