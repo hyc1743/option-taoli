@@ -2,8 +2,10 @@ import dashboard_server
 import re
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from option_taoli.execution_diagnostics import ExecutionDiagnostic
+from option_taoli.market_depth import ExecutableQuote
 
 
 CLIENT_SOURCE = Path("src/dashboard_client.js").read_text(encoding="utf-8")
@@ -81,6 +83,52 @@ def test_execution_diagnostic_serializes_for_scan_api():
     assert data["all_taker_net_profit"] == "95"
     assert data["maker_anchor_net_profit"] == "120"
     assert data["reject_reasons"] == []
+
+
+def test_snapshot_hedge_quotes_are_available_to_execution_diagnostics(monkeypatch):
+    hedge_quote = ExecutableQuote(
+        instrument_key="binance:perpetual:BTCUSDT",
+        exchange="binance",
+        market_type="perpetual",
+        instrument_id="BTCUSDT",
+        best_bid_price="100000",
+        best_ask_price="100010",
+        best_bid_size="2",
+        best_ask_size="2",
+        mid_price="100005",
+        spread="10",
+        received_at_ms=1810880000000,
+        normalized_at_ms=1810880000000,
+    )
+    captured = {}
+
+    class FakeMonitor:
+        def __init__(self, config, history_store=None):
+            pass
+
+        def scan_once(self, batch, *, observed_at_ms):
+            captured["has_hedge_quote"] = hedge_quote.instrument_key in batch.quotes_by_instrument_key
+            return SimpleNamespace(displayed_opportunities=[])
+
+    monkeypatch.setattr(dashboard_server, "ArbitrageMonitor", FakeMonitor)
+    result = dashboard_server._result_from_snapshots(
+        {
+            "binance": dashboard_server.ExchangeSnapshot(
+                "binance",
+                [object()],
+                {},
+                hedge_quote,
+                ("binance:perpetual", "btc_usd"),
+                100000,
+                [],
+            )
+        },
+        now_ms=1810880000000,
+        partial=True,
+    )
+
+    assert result["error"] is None
+    assert captured["has_hedge_quote"] is True
 
 
 def test_dashboard_bundle_stale_when_missing_or_source_is_newer(tmp_path, monkeypatch):

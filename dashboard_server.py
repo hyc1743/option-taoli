@@ -111,8 +111,10 @@ def _result_from_snapshots(
         all_quotes.update(snap.quotes_by_key)
         if snap.hedge_quote and snap.hedge_key:
             all_hedges[snap.hedge_key] = snap.hedge_quote
+            all_quotes[snap.hedge_quote.instrument_key] = snap.hedge_quote
         for hedge_key, hedge_quote in snap.extra_hedges:
             all_hedges[hedge_key] = hedge_quote
+            all_quotes[hedge_quote.instrument_key] = hedge_quote
         if snap.atm_price > 0:
             atm_prices[name] = f"${snap.atm_price:,.0f}"
 

@@ -1,4 +1,7 @@
 import scan_multi
+from types import SimpleNamespace
+
+from option_taoli.market_depth import ExecutableQuote
 
 
 def test_deribit_fetcher_uses_usdc_settled_btc_options_without_deribit_hedge(monkeypatch):
@@ -70,6 +73,52 @@ def test_deribit_fetcher_uses_usdc_settled_btc_options_without_deribit_hedge(mon
     assert list(snapshot.quotes_by_key) == ["deribit:option:BTC_USDC-27JUN25-100000-C"]
     assert not any("BTC-PERPETUAL" in url or "currency=BTC" in url for url in seen_urls)
     assert not any("public/ticker?instrument_name=BTC_USDC-27JUN25-100000-C" in url for url in seen_urls)
+
+
+def test_scan_all_makes_hedge_quotes_available_to_execution_diagnostics(monkeypatch):
+    hedge_quote = ExecutableQuote(
+        instrument_key="binance:perpetual:BTCUSDT",
+        exchange="binance",
+        market_type="perpetual",
+        instrument_id="BTCUSDT",
+        best_bid_price="100000",
+        best_ask_price="100010",
+        best_bid_size="2",
+        best_ask_size="2",
+        mid_price="100005",
+        spread="10",
+        received_at_ms=1810880000000,
+        normalized_at_ms=1810880000000,
+    )
+    captured = {}
+
+    def fake_fetcher(now_ms):
+        return scan_multi.ExchangeSnapshot(
+            "binance",
+            [object()],
+            {},
+            hedge_quote,
+            ("binance:perpetual", scan_multi.BTC_USD_HEDGE_GROUP),
+            100000,
+            [],
+        )
+
+    class FakeMonitor:
+        def __init__(self, config, history_store=None):
+            pass
+
+        def scan_once(self, batch, *, observed_at_ms):
+            captured["has_hedge_quote"] = hedge_quote.instrument_key in batch.quotes_by_instrument_key
+            return SimpleNamespace(displayed_opportunities=[])
+
+    monkeypatch.setattr(scan_multi, "FETCHERS", {"binance": fake_fetcher})
+    monkeypatch.setattr(scan_multi, "ArbitrageMonitor", FakeMonitor)
+    monkeypatch.setattr(scan_multi, "OpportunityHistoryStore", lambda path: None)
+
+    result = scan_multi.scan_all(["binance"])
+
+    assert result["error"] is None if "error" in result else True
+    assert captured["has_hedge_quote"] is True
 
 
 def test_deribit_fetcher_prefers_warm_cache(monkeypatch):
