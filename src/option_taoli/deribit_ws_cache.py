@@ -34,7 +34,11 @@ def plan_deribit_option_subscriptions(
             continue
         if lo <= strike <= hi:
             selected.append((int(raw["expiration_timestamp"]), strike, str(raw["instrument_name"])))
-    return [f"ticker.{name}.raw" for _, _, name in sorted(selected)]
+    channels: list[str] = []
+    for _, _, name in sorted(selected):
+        channels.append(f"ticker.{name}.100ms")
+        channels.append(f"book.{name}.raw")
+    return channels
 
 
 @dataclass
@@ -67,6 +71,33 @@ class DeribitTickerCache:
         return len(self.snapshot(now_ms=now_ms)) >= minimum_quotes
 
 
+@dataclass
+class DeribitBookCache:
+    ttl_ms: int = 10_000
+    _books: dict[str, tuple[dict[str, Any], int]] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def update(self, raw: dict[str, Any], *, received_at_ms: int | None = None) -> None:
+        instrument_name = raw.get("instrument_name")
+        if not instrument_name:
+            return
+        timestamp = received_at_ms if received_at_ms is not None else int(time.time() * 1000)
+        with self._lock:
+            self._books[str(instrument_name)] = (dict(raw), timestamp)
+
+    def snapshot(self, *, now_ms: int | None = None) -> dict[str, dict[str, Any]]:
+        now = now_ms if now_ms is not None else int(time.time() * 1000)
+        fresh: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for instrument_name, (raw, received_at_ms) in self._books.items():
+                if now - received_at_ms > self.ttl_ms:
+                    continue
+                if not _has_two_sided_book(raw):
+                    continue
+                fresh[instrument_name] = dict(raw)
+        return fresh
+
+
 class DeribitMarketDataCache:
     def __init__(
         self,
@@ -78,6 +109,7 @@ class DeribitMarketDataCache:
         self._channels = list(channels or [])
         self._ws_url = ws_url
         self._ticker_cache = DeribitTickerCache(ttl_ms=ttl_ms)
+        self._book_cache = DeribitBookCache(ttl_ms=ttl_ms)
         self._instruments_by_name: dict[str, dict[str, Any]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -99,16 +131,29 @@ class DeribitMarketDataCache:
     def update(self, raw: dict[str, Any], *, received_at_ms: int | None = None) -> None:
         self._ticker_cache.update(raw, received_at_ms=received_at_ms)
 
+    def update_book(self, raw: dict[str, Any], *, received_at_ms: int | None = None) -> None:
+        self._book_cache.update(raw, received_at_ms=received_at_ms)
+
     def snapshot(self, *, now_ms: int | None = None) -> dict[str, dict[str, Any]]:
         tickers = self._ticker_cache.snapshot(now_ms=now_ms)
-        for instrument_name, raw in tickers.items():
+        books = self._book_cache.snapshot(now_ms=now_ms)
+        names = sorted(set(tickers) | set(books))
+        market_data: dict[str, dict[str, Any]] = {}
+        for instrument_name in names:
+            raw = dict(tickers.get(instrument_name, {}))
+            if "instrument_name" not in raw:
+                raw["instrument_name"] = instrument_name
+            book = books.get(instrument_name)
+            if book is not None:
+                raw["book"] = dict(book)
             instrument = self._instruments_by_name.get(instrument_name)
             if instrument is not None:
                 raw["instrument"] = dict(instrument)
-        return tickers
+            market_data[instrument_name] = raw
+        return market_data
 
     def is_warm(self, *, minimum_quotes: int = 1, now_ms: int | None = None) -> bool:
-        return self._ticker_cache.is_warm(minimum_quotes=minimum_quotes, now_ms=now_ms)
+        return len(self.snapshot(now_ms=now_ms)) >= minimum_quotes
 
     def start_background(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -149,9 +194,15 @@ class DeribitMarketDataCache:
             )
             while not self._stop.is_set():
                 message = json.loads(await ws.recv())
-                data = message.get("params", {}).get("data")
+                params = message.get("params", {})
+                channel = str(params.get("channel", ""))
+                data = params.get("data")
                 if isinstance(data, dict):
-                    self.update(data)
+                    received_at_ms = int(time.time() * 1000)
+                    if channel.startswith("book."):
+                        self.update_book(data, received_at_ms=received_at_ms)
+                    else:
+                        self.update(data, received_at_ms=received_at_ms)
 
 
 def _is_btc_usdc_option(raw: dict[str, Any]) -> bool:
@@ -165,3 +216,7 @@ def _has_two_sided_quote(raw: dict[str, Any]) -> bool:
         and raw.get("best_bid_amount") is not None
         and raw.get("best_ask_amount") is not None
     )
+
+
+def _has_two_sided_book(raw: dict[str, Any]) -> bool:
+    return bool(raw.get("bids")) and bool(raw.get("asks"))

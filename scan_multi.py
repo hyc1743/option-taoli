@@ -191,7 +191,13 @@ def _deribit_snapshot_from_cached_tickers(
         try:
             inst_raw = raw.get("instrument") if isinstance(raw.get("instrument"), dict) else _instrument_from_deribit_name(raw)
             inst = _with_btc_hedge_group(adapter.normalize_instrument(inst_raw))
-            q = standardize_quote(adapter.normalize_quote(raw, market_type="option"))
+            book_raw = raw.get("book")
+            if isinstance(book_raw, dict):
+                q = _executable_quote_from_order_book(
+                    standardize_order_book(adapter.normalize_order_book(book_raw, market_type="option"))
+                )
+            else:
+                q = standardize_quote(adapter.normalize_quote(raw, market_type="option"))
             insts.append(inst)
             quotes[q.instrument_key] = q
         except Exception as e:

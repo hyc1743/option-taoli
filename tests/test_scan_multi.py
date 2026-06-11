@@ -138,6 +138,65 @@ def test_deribit_fetcher_prefers_warm_cache(monkeypatch):
     assert snapshot.hedge_quote is None
 
 
+def test_deribit_fetcher_builds_quotes_from_cached_books(monkeypatch):
+    cache = scan_multi.DeribitMarketDataCache(ttl_ms=1000)
+    cache.configure(
+        [
+            "ticker.BTC_USDC-27JUN25-100000-C.100ms",
+            "book.BTC_USDC-27JUN25-100000-C.raw",
+        ],
+        instruments=[
+            {
+                "instrument_name": "BTC_USDC-27JUN25-100000-C",
+                "kind": "option",
+                "base_currency": "BTC",
+                "quote_currency": "USDC",
+                "settlement_currency": "USDC",
+                "expiration_timestamp": 1751011200000,
+                "strike": "100000",
+                "option_type": "call",
+                "instrument_type": "linear",
+                "settlement_period": "month",
+                "contract_size": "1",
+                "tick_size": "0.5",
+                "price_index": "btc_usdc",
+                "state": "open",
+            }
+        ],
+    )
+    cache.update(
+        {
+            "instrument_name": "BTC_USDC-27JUN25-100000-C",
+            "best_bid_price": "5000",
+            "best_ask_price": "5010",
+            "best_bid_amount": "1",
+            "best_ask_amount": "1",
+            "timestamp": 1810880000000,
+        },
+        received_at_ms=1810880000000,
+    )
+    cache.update_book(
+        {
+            "instrument_name": "BTC_USDC-27JUN25-100000-C",
+            "bids": [["change", "5001", "4"]],
+            "asks": [["change", "5009", "5"]],
+            "timestamp": 1810880000001,
+            "change_id": 10,
+        },
+        received_at_ms=1810880000001,
+    )
+
+    monkeypatch.setattr(scan_multi, "_DERIBIT_CACHE", cache)
+
+    snapshot = scan_multi._fetch_deribit(1810880000500)
+
+    quote = snapshot.quotes_by_key["deribit:option:BTC_USDC-27JUN25-100000-C"]
+    assert quote.best_bid_price == "5001"
+    assert quote.best_ask_price == "5009"
+    assert quote.best_bid_size == "4"
+    assert quote.best_ask_size == "5"
+
+
 def test_binance_fetcher_uses_spot_for_hedge(monkeypatch):
     def fake_http_get(url: str, timeout: int = 15):
         if "eapi/v1/exchangeInfo" in url:
